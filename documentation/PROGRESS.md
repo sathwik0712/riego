@@ -8,49 +8,88 @@
 
 ---
 
-## Session 1: Week 1 — Farmer Home Dashboard & Growth Foundation
+## Session 2: Week 1 — Responsive Layout Update (Phone, Tablet, Desktop)
 
-### What Was Built
+### Problem Addressed
+The initial home dashboard was mobile-first but rendered as a narrow, constrained 512px column on tablets and laptops, leaving large empty margins. The layout has now been updated to responsively adapt across phone, tablet, and desktop viewports using Tailwind breakpoints while keeping mobile as the primary reference design.
 
-1. **Growth-Oriented Architecture (`riego/lib/`)**:
-   - `lib/types.ts`: Clean, minimal TypeScript definitions for `FarmerProfile`, `Advice`, `Weather`, and `Field` with `MoistureStatus`.
-   - `lib/strings.ts`: Central repository for all user-facing strings (app title, languages, advice text, weather labels, field status labels, tab names, placeholder text) to prepare for `next-intl` translation in Weeks 5–6.
-   - `lib/sampleData.ts`: Realistic static data (Farmer: Ramesh Kumar; Advice: "Water Field 1 at 6 AM for 30 minutes"; Weather: 32°C, Rain: No, Humidity: 60%; Fields: Wheat [80% Good], Rice [20% Dry], Mustard [48% Okay]).
-   - `lib/api.ts`: Thin asynchronous accessor functions (`getFarmerProfile()`, `getAdvice()`, `getWeather()`, `getFields()`) returning sample data. This allows swapping to FastAPI backend endpoints later without altering any UI components.
+### What Was Built & Changed
 
-2. **Persistent Shell in Root Layout (`riego/app/layout.tsx` & `globals.css`)**:
-   - Placed `TopBar` and `BottomNav` directly inside `layout.tsx` to maintain DRY code across all routes.
-   - Configured font stack with system fonts and fallback support for Indian scripts: `"Noto Sans Devanagari"` (Hindi) and `"Noto Sans Kannada"` (Kannada).
-   - Removed external Google Fonts web-fetch dependencies to ensure fast loading and offline resilience on low-bandwidth rural connections (NFR-3).
-   - Applied earthy palette: soft cream background (`#FAF7EE`), dark readable text (`#1B2D21`), and forest green primary (`#235334`).
+1. **Responsive App Shell (`riego/app/layout.tsx`)**:
+   - **Phone (<640px)**: Retains the exact mobile single-column layout with sticky TopBar, bottom navigation bar, and padding (`pb-28`) for navigation clearance.
+   - **Tablet (640px to 1023px)**: Expands content to full width with comfortable padding (`sm:px-6 md:px-8`), eliminating the narrow column while keeping the bottom navigation bar active.
+   - **Desktop ($\ge$1024px)**: Replaces the bottom navigation with a fixed left sidebar (`w-64`). Content area is offset by `lg:pl-64` with a maximum width of ~1200px (`max-w-6xl mx-auto`) and zero horizontal scrolling (`overflow-x-hidden`).
 
-3. **Reusable Mobile-First Components (`riego/components/`)**:
-   - `TopBar.tsx`: Farmer profile avatar circle (`R`), central `Riego` brand title, accessible `?` help button, and language switcher (`EN | हिं | ಕ`) with active language highlight. Touch targets are $\ge 56\text{px}$.
-   - `BottomNav.tsx`: Fixed navigation bar with 4 tabs (`Home`, `Plan`, `Fields`, `Alerts`), large icons, route-aware active state highlighting via `usePathname()`, and $\ge 56\text{px}$ touch targets.
-   - `AdviceCard.tsx`: Most prominent screen element in deep forest green (`#1A3E27`), water drop icon, bold plain recommendation text, and a visual speaker button (`🔊`).
-   - `WeatherStrip.tsx`: Clean horizontal strip with Temperature (`32°C 🌤️`), Rain forecast (`Rain: No 🌧️`), and Humidity (`60% 💧`).
-   - `FieldCard.tsx`: Reusable field card featuring field name, crop type, soil moisture progress bar, and **triple cue status** (Color + Icon + Word: Good / Okay / Dry) to ensure accessibility for low-literacy users.
+2. **Desktop Sidebar Navigation (`riego/components/Sidebar.tsx`)**:
+   - Fixed left sidebar visible only on desktop (`hidden lg:flex`).
+   - Displays Riego branding header and farmer profile badge at the bottom.
+   - 4 large navigation items (`Home`, `Plan`, `Fields`, `Alerts`) with icons, labels, and active tab highlighting via Next.js `usePathname()`.
+   - All touch/click targets meet accessibility requirements ($\ge 56\text{px}$).
 
-4. **Routes & Placeholder Screens (`riego/app/`)**:
-   - `app/page.tsx`: Home screen assembling the advice card, weather strip, and field cards.
-   - `app/plan/page.tsx`: Placeholder for irrigation scheduling timeline (Week 2).
-   - `app/fields/page.tsx`: Placeholder for sensor timeline and weekly history charts (Weeks 3–5).
-   - `app/alerts/page.tsx`: Placeholder for drought, sensor, and weather warnings (Weeks 5–6).
+3. **Responsive TopBar (`riego/components/TopBar.tsx`)**:
+   - Spans the content area at every breakpoint.
+   - On desktop ($\ge$1024px), displays full language names (`English`, `हिन्दी`, `ಕನ್ನಡ`) and adds a visible `"Help"` text label next to the `?` button.
+   - On mobile/tablet, retains the compact `EN | हिं | ಕ` switcher and profile circle.
 
-5. **Build & Bundler Resolution (`next.config.ts` & `package.json`)**:
-   - Resolved the Turbopack Node 26 process spawn issue by configuring Webpack with `@tailwindcss/turbopack` loader in [next.config.ts](file:///Users/sathivik/Documents/MyProjects/Riego/riego/next.config.ts).
-   - Tailwind CSS v4 utility styles are compiled into `.next/static/css` (generating all colors, borders, cards, and grid utilities).
+4. **Responsive Dashboard Grid (`riego/app/page.tsx`)**:
+   - **Advice & Weather Row**:
+     - Phone & Tablet: Stacked vertically full-width.
+     - Desktop ($\ge$1024px): Side-by-side in a 12-column row (`AdviceCard` takes 7 cols, `WeatherStrip` takes 5 cols).
+   - **Field Cards Grid**:
+     - Phone (<640px): 1-column list.
+     - Tablet (640px to 1023px): 2-column grid (`sm:grid-cols-2 gap-4`).
+     - Desktop ($\ge$1024px): 3-column grid (`lg:grid-cols-3 gap-6`).
+
+5. **Component Scaling & Placeholder Shells**:
+   - `AdviceCard.tsx`: Scaled typography (`text-xl sm:text-2xl lg:text-3xl`), optimal watering window hint on larger screens, and balanced button sizes.
+   - `WeatherStrip.tsx`: Adapts from a horizontal strip on mobile to a telemetry card on desktop matching the row height.
+   - `FieldCard.tsx`: Preserves triple cue status (Color + Icon + Word: Good / Okay / Dry) with equal card heights in 2-column and 3-column grids.
+   - `plan/page.tsx`, `fields/page.tsx`, `alerts/page.tsx`: Share the responsive shell (sidebar on desktop, bottom nav on tablet/mobile).
 
 ---
 
 ### Verification
-- `npm run build`: Successfully built all pages as static routes (`/`, `/plan`, `/fields`, `/alerts`, `/_not-found`) with fully compiled Tailwind CSS (20KB stylesheet). TypeScript compiled with 0 errors.
-- `npm run dev`: Development server running cleanly on `http://localhost:3000` with hot-reloading and CSS processing.
+- `npm run build`: Successfully built all pages with 0 errors. All routes (`/`, `/plan`, `/fields`, `/alerts`) prerendered statically.
+- `npm run dev`: Development server running cleanly on `http://localhost:3000`.
+- Verified layout responsiveness across 390px (Phone), 768px (Tablet), 1024px (Desktop), and 1440px (Wide screen) with zero horizontal overflow.
+
+---
+
+## Session 3: Week 1 — Field Registration Form UI (/fields/new)
+
+### Problem Addressed
+Implemented the multi-step field registration form specified in SRS Section 4.4 to let farmers register new plots, select crops and soil characteristics, and attach IoT sensor device IDs without backend dependencies.
+
+### What Was Built & Changed
+
+1. **Fields Page & Route Creation (`riego/app/fields/page.tsx`, `riego/app/fields/new/page.tsx`)**:
+   - Added an accessible "Add Field" action button ($\ge 56\text{px}$) on the Fields page and shortcut card.
+   - Created `/fields/new` route centered with max width ~600px, responsive across mobile, tablet, and desktop viewports.
+
+2. **Multi-Step Form Component (`riego/components/FieldRegistrationForm.tsx`)**:
+   - **Progress Indicator**: Step 1 to 5 counter, active step title, percentage completion, progress bar, and clickable completed step pills.
+   - **Screen 1 (Field Basics)**: Auto-generated read-only Field ID, optional nickname, location picker (GPS or Map Pin), area size number input, and unit cards (Acres/Guntas).
+   - **Screen 2 (Crop)**: Tap-friendly option cards for regional crops (Wheat, Rice, Tomato, Maize, Cotton, Mustard, Sugarcane, Potato) and sowing date picker paired with a "Not sown yet" toggle.
+   - **Screen 3 (Soil & Water)**: Option cards with descriptive hints for Soil type (Sandy, Loamy, Clay), Water source (Borewell, Canal, Tank, Rain-fed), Irrigation method (Drip, Sprinkler, Flood), and optional Pump flow rate with an "I don't know" button.
+   - **Screen 4 (Sensor Device)**: "Yes, installed" vs. "Not yet" toggle cards. Conditional Device ID input with visual QR scan button, and reassurance note when sensor is deferred.
+   - **Screen 5 (Review & Save)**: Grouped summary cards with "Edit" buttons linking back to each step, automatic growth stage calculation from sowing date, in-memory saving via `addSampleField()`, and celebratory success screen.
+   - **Validation & Accessibility**: Strict field validation on each step with plain error alerts; all touch targets $\ge 56\text{px}$; color is always paired with icons and text.
+
+3. **Data Types & Sample Option Lists (`riego/lib/types.ts`, `riego/lib/sampleData.ts`, `riego/lib/api.ts`)**:
+   - Added `FieldFormData` and `FormOption` interfaces.
+   - Centralized all option lists (`cropOptions`, `soilTypeOptions`, `waterSourceOptions`, `irrigationMethodOptions`, `areaUnitOptions`) in `sampleData.ts`.
+   - Added in-memory mutation helpers (`addSampleField`, `createField`) so saved fields appear in `getFields()`.
+
+---
+
+### Verification
+- `npm run build`: Successfully built all pages with 0 errors (`/`, `/plan`, `/fields`, `/fields/new`, `/alerts`).
+- Validated all 5 steps with required input checks, backward/forward navigation, edit shortcuts, and memory persistence.
 
 ---
 
 ### What's Next
-- **Week 1–2 Ingestion & Backend Prep**:
-  - Set up FastAPI project skeleton in backend.
-  - Define data schemas for sensor readings and weather forecasts (OpenWeatherMap / Tomorrow.io).
-  - Prepare field registration endpoints to connect with `lib/api.ts`.
+- **Week 1–2: Sensor and Weather Ingestion (Module 1)**:
+  - Setup FastAPI backend foundation.
+  - Define data schemas for sensor telemetry (MQTT/REST) and weather forecasts (OpenWeatherMap).
+  - Connect `riego/lib/api.ts` to backend endpoints.

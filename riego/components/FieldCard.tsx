@@ -1,6 +1,7 @@
 // Reusable Field Card component
 // Displays field name, crop, moisture progress bar with percentage
 // Uses triple visual cue: colour + icon + text (Good / Okay / Dry)
+// Responsive: Scales gracefully with consistent card height across grid layouts
 
 import { STRINGS } from "../lib/strings";
 import { Field, MoistureStatus } from "../lib/types";
@@ -57,43 +58,45 @@ export default function FieldCard({ field }: FieldCardProps) {
   const clampedPercentage = Math.min(Math.max(field.moisturePercentage, 0), 100);
 
   return (
-    <article className="w-full bg-[#FFFFFF] rounded-2xl p-4 sm:p-5 shadow-sm border border-[#DCD6C0]">
+    <article className="w-full h-full flex flex-col justify-between bg-[#FFFFFF] rounded-3xl p-5 sm:p-6 shadow-sm border border-[#DCD6C0] hover:shadow-md transition-shadow">
       {/* Header: Field Name, Crop, and Triple Status Indicator */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <span className="text-xl" aria-hidden="true">
-            {status.bulletEmoji}
-          </span>
-          <div>
-            <h3 className="text-xl font-bold text-[#1B2D21] leading-tight">
-              {field.name}
-            </h3>
-            <p className="text-sm font-semibold text-[#5F6E62]">
-              🌾 {field.crop}
-            </p>
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl" aria-hidden="true">
+              {status.bulletEmoji}
+            </span>
+            <div>
+              <h3 className="text-xl sm:text-2xl font-bold text-[#1B2D21] leading-tight">
+                {field.name}
+              </h3>
+              <p className="text-sm sm:text-base font-semibold text-[#5F6E62] mt-0.5">
+                🌾 {field.crop}
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Status Badge: Icon + Word */}
-        <div
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${status.badgeBg} ${status.badgeBorder} ${status.textColor}`}
-        >
-          <span className="font-extrabold text-sm" aria-hidden="true">
-            {status.icon}
-          </span>
-          <span className="text-sm font-bold uppercase tracking-wide">
-            {status.label}
-          </span>
+          {/* Status Badge: Icon + Word */}
+          <div
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border ${status.badgeBg} ${status.badgeBorder} ${status.textColor} shrink-0`}
+          >
+            <span className="font-extrabold text-sm" aria-hidden="true">
+              {status.icon}
+            </span>
+            <span className="text-xs sm:text-sm font-bold uppercase tracking-wide">
+              {status.label}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Soil Moisture Bar */}
-      <div className="mt-4">
-        <div className="flex justify-between items-baseline mb-1.5">
+      <div className="mt-5 pt-3 border-t border-[#F2EFE4]">
+        <div className="flex justify-between items-baseline mb-2">
           <span className="text-sm font-semibold text-[#3D4D41]">
             {STRINGS.moistureLabel}
           </span>
-          <span className="text-lg font-black text-[#1B2D21]">
+          <span className="text-lg sm:text-xl font-black text-[#1B2D21]">
             {clampedPercentage}%
           </span>
         </div>
@@ -116,4 +119,3 @@ export default function FieldCard({ field }: FieldCardProps) {
     </article>
   );
 }
-

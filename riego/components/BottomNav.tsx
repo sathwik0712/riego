@@ -89,7 +89,7 @@ export default function BottomNav() {
   return (
     <nav
       aria-label="Primary Navigation"
-      className="fixed bottom-0 left-0 right-0 z-30 bg-[#FAF7EE] border-t-2 border-[#D1CAAD] shadow-lg safe-area-pb"
+      className="fixed bottom-0 left-0 right-0 z-30 bg-[#FAF7EE] border-t-2 border-[#D1CAAD] shadow-lg safe-area-pb lg:hidden"
     >
       <div className="grid grid-cols-4 max-w-lg mx-auto px-2 py-1.5">
         {navItems.map((item) => {

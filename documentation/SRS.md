@@ -164,6 +164,70 @@ Priority: **M** = must have, **S** = should have, **C** = could have.
 - **Fields:** field overview with sensor timeline and weekly history
 - **Alerts:** list of notifications with a red, yellow or green dot
 
+### 4.4 Field registration form (current task)
+
+**Scope:** UI only. Static data, no backend, no login. On "Save", show a success message and add the field to the sample data in memory (or just log it). Keep the form in its own component so it can later be connected to a real API.
+
+**Location:** new page at `/fields/new`, opened from an "Add field" button on the Fields page. Same layout shell as the other pages.
+
+**Form behaviour**
+- Multi-step form with 5 screens, one at a time
+- Progress indicator at the top (Step 1 of 5)
+- Big "Next" and "Back" buttons (at least 56px tall)
+- Icons plus words on every option; tap-friendly option cards instead of small dropdowns where possible
+- Phone first, then scale up to tablet and desktop (form centred, max width about 600px)
+- Required fields are checked before moving to the next screen; show a short, plain error message
+
+**Screen 1: Field basics**
+| Field | Input | Required |
+|---|---|---|
+| Field ID | Auto-generated, not editable | Auto |
+| Nickname | Text, e.g. "North field" | No |
+| Location | "Use my current location" button, or "Pick on map" (visual placeholder for now) | Yes |
+| Area | Number plus unit (acres or guntas) | Yes |
+
+**Screen 2: Crop**
+| Field | Input | Required |
+|---|---|---|
+| Crop name | Dropdown or option cards (Wheat, Rice, Tomato, etc. from a sample list) | Yes |
+| Sowing date | Date picker (approximate), or a "Not sown yet" option | Yes |
+
+**Screen 3: Soil and water**
+| Field | Input | Required |
+|---|---|---|
+| Soil type | Option cards: Sandy, Loamy, Clay (with a short hint on each) | Yes |
+| Water source | Option cards: Borewell, Canal, Tank, Rain-fed only | Yes |
+| Irrigation method | Option cards: Drip, Sprinkler, Flood | Yes |
+| Pump flow rate | Number input with an "I don't know" button | No |
+
+**Screen 4: Sensor device**
+| Field | Input | Required |
+|---|---|---|
+| Sensor device installed? | Yes / Not yet | Yes |
+| Device ID | Text input, shown only if "Yes". QR scan button is visual only | If "Yes" |
+
+If "Not yet", the field still saves and shows a note: "You can add the device later."
+
+**Screen 5: Review and save**
+- Summary card showing everything entered, grouped by screen
+- "Edit" button on each group that jumps back to that screen
+- Big "Save field" button
+- After saving, show a success message and a button back to the Fields page
+
+**Filled automatically (not asked in the form)**
+- Farmer account ID (use a fixed sample value for now)
+- Registration date
+- Crop growth stage (calculated from the sowing date)
+
+**Not in this task**
+- Language switching inside the form (the EN / हिं / ಕ switcher stays visual only)
+- Real GPS, map, QR scanning, backend or database
+- Farmer signup and login (separate flow, later)
+
+**Code notes**
+- Keep the form data type in one place (for example `lib/types.ts`)
+- Keep the crop list, soil types and other options in one sample data file
+- Do not install new packages without asking
 ---
 
 ## 5. Non-functional requirements

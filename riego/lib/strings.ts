@@ -4,13 +4,14 @@
 export const STRINGS = {
   appName: "Riego",
 
-  // Top bar
+  // Top bar & Language switcher
   helpButtonAria: "Help",
+  helpLabel: "Help",
   profileAria: "Farmer profile",
   languages: [
-    { code: "en", label: "EN" },
-    { code: "hi", label: "हिं" },
-    { code: "kn", label: "ಕ" },
+    { code: "en", label: "EN", fullLabel: "English" },
+    { code: "hi", label: "हिं", fullLabel: "हिन्दी" },
+    { code: "kn", label: "ಕ", fullLabel: "ಕನ್ನಡ" },
   ],
 
   // Today's advice card
@@ -20,6 +21,8 @@ export const STRINGS = {
   // Weather strip
   weather: {
     temperatureUnit: "°C",
+    temperatureLabel: "Temperature",
+    forecastLabel: "Forecast",
     rainLabel: "Rain",
     rainYes: "Yes",
     rainNo: "No",
@@ -33,7 +36,7 @@ export const STRINGS = {
   statusOkay: "Okay",
   statusDry: "Dry",
 
-  // Bottom navigation tabs
+  // Navigation items (used in BottomNav and Desktop Sidebar)
   nav: {
     home: "Home",
     plan: "Plan",
@@ -53,4 +56,3 @@ export const STRINGS = {
     backHome: "Go to Home",
   },
 };
-
