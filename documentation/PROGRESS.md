@@ -88,6 +88,36 @@ Implemented the multi-step field registration form specified in SRS Section 4.4 
 
 ---
 
+## Session 4: Week 1 — TopBar & Dashboard Card Polish (Phone & Desktop Consistency)
+
+### Problem Addressed
+Refined the mobile top bar layout to include the Riego drop logo without overlapping at 360px and 390px widths, and unified the Advice and Weather cards so their content and styling remain clean and identical across phone and desktop viewports.
+
+### What Was Built & Changed
+
+1. **Mobile TopBar Layout (`riego/components/TopBar.tsx`)**:
+   - Far left retains the farmer profile circle (`farmerInitial`).
+   - Center displays the Riego logo (square emerald card with water drop `💧`, matching the desktop sidebar) directly before the "Riego" brand title.
+   - Right maintains the accessible "?" help button and language switcher (`EN | हिं | ಕ`).
+   - Compact spacing and padding ensures zero overlap on 360px and 390px viewports.
+
+2. **AdviceCard Cleanup (`riego/components/AdviceCard.tsx`)**:
+   - Removed desktop-only footer metadata ("AI recommendation updated 15m ago" and "Optimal window: 6:00 - 6:30 AM").
+   - Card content and styling now match identically across phone and desktop.
+
+3. **WeatherStrip Content & Wrapping Fix (`riego/components/WeatherStrip.tsx`)**:
+   - Removed the "Farm Weather Telemetry" heading, "OpenWeather" label, and "Evaporation: Normal" footer.
+   - Weather card now focuses solely on the three telemetry metrics: Temperature, Rain Forecast, and Humidity.
+   - Added `whitespace-nowrap` to ensure "Rain: No" stays strictly on a single line.
+
+---
+
+### Verification
+- `npm run build`: Successfully built all pages with 0 errors.
+- Verified TopBar layout at 360px and 390px with comfortable spacing between left profile, center brand with logo, and right language/help controls.
+
+---
+
 ### What's Next
 - **Week 1–2: Sensor and Weather Ingestion (Module 1)**:
   - Setup FastAPI backend foundation.

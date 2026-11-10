@@ -2,7 +2,7 @@
 
 // AdviceCard: Most prominent element on the screen
 // Strong color, large clear text, water drop icon, speaker button (visual only)
-// Responsive: Scales gracefully up to desktop with larger typography and comfortable padding
+// Content and style are identical on phone and desktop; only size scales responsively
 
 import { useState } from "react";
 import { STRINGS } from "../lib/strings";
@@ -60,12 +60,6 @@ export default function AdviceCard({ actionText }: AdviceCardProps) {
             <span aria-hidden="true">{isPlaying ? "🔊" : "🔈"}</span>
           </button>
         </div>
-      </div>
-
-      {/* Subtle indicator hint for desktop */}
-      <div className="mt-4 pt-3 border-t border-[#2D6A4F]/50 hidden sm:flex items-center justify-between text-xs text-[#E3DEC3]">
-        <span>⚡ AI recommendation updated 15m ago</span>
-        <span className="font-semibold text-[#A3E635]">Optimal window: 6:00 - 6:30 AM</span>
       </div>
     </section>
   );
