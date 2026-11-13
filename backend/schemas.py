@@ -1,0 +1,278 @@
+from datetime import date, datetime, timezone, timedelta
+from typing import Optional
+from pydantic import BaseModel
+from growth import get_growth_stage
+
+# Check Pydantic version for validator compatibility
+try:
+    from pydantic import ConfigDict, field_validator, model_validator
+    IS_V2 = True
+except ImportError:
+    from pydantic import validator as field_validator, root_validator
+    IS_V2 = False
+
+# Allowed values for restricted choices
+VALID_AREA_UNITS = {"acres", "guntas"}
+VALID_SOIL_TYPES = {"Sandy", "Loamy", "Clay"}
+VALID_WATER_SOURCES = {"Borewell", "Canal", "Tank", "Rain-fed"}
+VALID_IRRIGATION_METHODS = {"Drip", "Sprinkler", "Flood"}
+
+
+class FieldCreate(BaseModel):
+    nickname: Optional[str] = None
+    latitude: float
+    longitude: float
+    area: float
+    area_unit: str
+    crop: str
+    sowing_date: Optional[date] = None
+    soil_type: str
+    water_source: str
+    irrigation_method: str
+    pump_flow_rate: Optional[float] = None
+    has_sensor: bool
+    device_id: Optional[str] = None
+
+    # Trim nickname; empty string becomes None
+    @field_validator("nickname")
+    @classmethod
+    def validate_nickname(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v if v else None
+        return v
+
+    # Crop cannot be empty
+    @field_validator("crop")
+    @classmethod
+    def validate_crop(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if not v:
+            raise ValueError("Crop cannot be empty")
+        return v
+
+    # Area unit must be "acres" or "guntas"
+    @field_validator("area_unit")
+    @classmethod
+    def validate_area_unit(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if v not in VALID_AREA_UNITS:
+            raise ValueError("Area unit must be 'acres' or 'guntas'")
+        return v
+
+    # Soil type must be "Sandy", "Loamy" or "Clay"
+    @field_validator("soil_type")
+    @classmethod
+    def validate_soil_type(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if v not in VALID_SOIL_TYPES:
+            raise ValueError("Soil type must be 'Sandy', 'Loamy' or 'Clay'")
+        return v
+
+    # Water source must be "Borewell", "Canal", "Tank" or "Rain-fed"
+    @field_validator("water_source")
+    @classmethod
+    def validate_water_source(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if v not in VALID_WATER_SOURCES:
+            raise ValueError("Water source must be 'Borewell', 'Canal', 'Tank' or 'Rain-fed'")
+        return v
+
+    # Irrigation method must be "Drip", "Sprinkler" or "Flood"
+    @field_validator("irrigation_method")
+    @classmethod
+    def validate_irrigation_method(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if v not in VALID_IRRIGATION_METHODS:
+            raise ValueError("Irrigation method must be 'Drip', 'Sprinkler' or 'Flood'")
+        return v
+
+    # Latitude between -90 and 90
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v):
+        if v < -90 or v > 90:
+            raise ValueError("Latitude must be between -90 and 90")
+        return v
+
+    # Longitude between -180 and 180
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v):
+        if v < -180 or v > 180:
+            raise ValueError("Longitude must be between -180 and 180")
+        return v
+
+    # Area must be greater than 0
+    @field_validator("area")
+    @classmethod
+    def validate_area(cls, v):
+        if v <= 0:
+            raise ValueError("Area must be greater than 0")
+        return v
+
+    # Pump flow rate must be greater than 0 if given
+    @field_validator("pump_flow_rate")
+    @classmethod
+    def validate_pump_flow_rate(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Pump flow rate must be greater than 0")
+        return v
+
+    # Sowing date cannot be in the future
+    @field_validator("sowing_date")
+    @classmethod
+    def validate_sowing_date(cls, v):
+        if v is not None and v > date.today():
+            raise ValueError("Sowing date cannot be in the future")
+        return v
+
+    # Trim device_id; empty string becomes None
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v if v else None
+        return v
+
+    # Cross-field validation: sensor and device_id relationship
+    if IS_V2:
+        @model_validator(mode="after")
+        def validate_sensor_and_device(self):
+            if self.has_sensor:
+                if not self.device_id:
+                    raise ValueError("Device ID is required when sensor is installed")
+            else:
+                if self.device_id:
+                    raise ValueError("Device ID must be empty when no sensor is installed")
+            return self
+    else:
+        @root_validator
+        def validate_sensor_and_device(cls, values):
+            has_sensor = values.get("has_sensor")
+            device_id = values.get("device_id")
+            if has_sensor:
+                if not device_id:
+                    raise ValueError("Device ID is required when sensor is installed")
+            else:
+                if device_id:
+                    raise ValueError("Device ID must be empty when no sensor is installed")
+            return values
+
+
+class FieldOut(FieldCreate):
+    id: int
+    farmer_id: str
+    registered_at: datetime
+    # Calculated dynamically without a database column
+    growth_stage: str = ""
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+
+        @model_validator(mode="after")
+        def set_growth_stage(self):
+            self.growth_stage = get_growth_stage(self.sowing_date)
+            return self
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+        @root_validator
+        def set_growth_stage(cls, values):
+            values["growth_stage"] = get_growth_stage(values.get("sowing_date"))
+            return values
+
+
+# Schema for incoming sensor readings
+class SensorReadingCreate(BaseModel):
+    device_id: str
+    raw_value: int
+    time: Optional[datetime] = None
+
+    # device_id is required, must not be empty, and trimmed
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if not v:
+            raise ValueError("Device ID is required and cannot be empty")
+        return v
+
+    # raw_value must be a whole number between 0 and 4095 (ESP32 12-bit ADC range)
+    @field_validator("raw_value")
+    @classmethod
+    def validate_raw_value(cls, v):
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise ValueError("Raw value must be a whole number")
+        if v < 0 or v > 4095:
+            raise ValueError("Raw value must be between 0 and 4095")
+        return v
+
+    # Validate timestamp bounds if supplied (max 5 minutes future, max 7 days past)
+    @field_validator("time")
+    @classmethod
+    def validate_time(cls, v):
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            v_aware = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
+
+            if v_aware > now + timedelta(minutes=5):
+                raise ValueError("Timestamp cannot be more than 5 minutes in the future")
+            if v_aware < now - timedelta(days=7):
+                raise ValueError("Timestamp cannot be older than 7 days")
+        return v
+
+    # Support 'timestamp' key as an alternative input for 'time'
+    # and default to current server time if omitted
+    if IS_V2:
+        @model_validator(mode="before")
+        @classmethod
+        def handle_timestamp_field(cls, data):
+            if isinstance(data, dict):
+                if "time" not in data and "timestamp" in data:
+                    data["time"] = data["timestamp"]
+            return data
+
+        @model_validator(mode="after")
+        def set_default_time(self):
+            if self.time is None:
+                self.time = datetime.now(timezone.utc)
+            return self
+    else:
+        @root_validator(pre=True)
+        def handle_timestamp_field(cls, values):
+            if isinstance(values, dict):
+                if "time" not in values and "timestamp" in values:
+                    values["time"] = values["timestamp"]
+            return values
+
+        @root_validator
+        def set_default_time(cls, values):
+            if values.get("time") is None:
+                values["time"] = datetime.now(timezone.utc)
+            return values
+
+
+# Schema for returning sensor readings
+class SensorReadingOut(BaseModel):
+    time: datetime
+    device_id: str
+    field_id: int
+    raw_value: int
+    moisture_percent: Optional[float] = None
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True

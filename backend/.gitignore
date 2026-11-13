@@ -1,0 +1,13 @@
+# Environment variables
+.env
+
+# Python build & bytecode artifacts
+__pycache__/
+*.pyc
+
+# Virtual environment
+myenv/
+
+# System files
+.DS_Store
+

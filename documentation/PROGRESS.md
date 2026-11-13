@@ -4,7 +4,7 @@
 - **Project:** Riego — AI-Powered Smart Irrigation System for Smallholder Farmers
 - **Developer:** G Sathvik
 - **Internship:** Infosys Springboard (8 Weeks)
-- **Current Milestone:** Week 1 — Mobile-first UI Prototype with static data
+- **Current Milestone:** Week 1–2 — Field Registration API and Sensor Data Ingestion (Backend)
 
 ---
 
@@ -123,3 +123,71 @@ Refined the mobile top bar layout to include the Riego drop logo without overlap
   - Setup FastAPI backend foundation.
   - Define data schemas for sensor telemetry (MQTT/REST) and weather forecasts (OpenWeatherMap).
   - Connect `riego/lib/api.ts` to backend endpoints.
+
+---
+
+## Session 5: Week 1–2 — Field Registration API and Sensor Data Ingestion (Backend)
+
+### What Was Built & Changed
+
+1. **Setup (`backend/`)**:
+   - TimescaleDB running in Docker (`riego_db`, image `timescale/timescaledb:latest-pg16`, port 5432), with data persisted in a named Docker volume (`riego_data`).
+   - FastAPI server entry point in `main.py`; secrets in `.env` (not committed).
+   - `DATABASE_URL` uses the `postgresql+psycopg2://` driver scheme required by SQLAlchemy.
+
+2. **Database (`models.py`)**:
+   - `fields` table: stores all field metadata (location, crop, soil, irrigation, sensor flag, device ID, registration time).
+   - `sensor_readings` converted to a TimescaleDB hypertable on the `time` column via `create_hypertable(..., if_not_exists => TRUE)` on startup — safe to run on every restart.
+
+3. **Field API (`routers/fields.py`, `schemas.py`)**:
+   - `POST /fields`: saves a new field; `farmer_id` is fixed to `"farmer_001"`; returns 409 if `device_id` is already in use.
+   - `GET /fields`: lists all fields, newest first.
+   - `GET /fields/{id}`: single field or 404.
+   - Validation (Pydantic): `area_unit` ∈ {acres, guntas}, `soil_type` ∈ {Sandy, Loamy, Clay}, `water_source` ∈ {Borewell, Canal, Tank, Rain-fed}, `irrigation_method` ∈ {Drip, Sprinkler, Flood}, lat/lon bounds, area > 0, sowing date not in the future, `device_id` required when `has_sensor` is true.
+   - `growth_stage` added to `FieldOut` (computed, not stored): Germination (0–14 days), Vegetative (15–45), Flowering (46–75), Maturity (76+), or "Not sown yet" — defined in `growth.py`.
+
+4. **Sensor Ingestion (`routers/sensor_readings.py`, `models.py`)**:
+   - `POST /sensor-readings`: accepts `device_id`, `raw_value`, optional `time`; looks up the field by `device_id` (404 if unknown); saves the reading with 201.
+   - `GET /sensor-readings/{device_id}`: returns the latest 20 readings, newest first.
+
+5. **Validation (`schemas.py`)**:
+   - `raw_value` must be an integer in [0, 4095] (ESP32 12-bit ADC range).
+   - `device_id` required and non-empty (spaces trimmed).
+   - Timestamp (if supplied) must be within −7 days to +5 minutes of now.
+   - Duplicate `(device_id, time)` returns 409 instead of a database crash; guarded both in the query and with `IntegrityError` rollback.
+
+6. **Normalization (`normalize.py`, `calibration.py`)**:
+   - `raw_to_moisture_percent()`: linear conversion from raw ADC to 0–100%, clamped and rounded to 1 decimal. Formula: `(DRY_RAW − raw) / (DRY_RAW − WET_RAW) × 100`.
+   - Calibration placeholders in `calibration.py`: `DRY_RAW = 3500`, `WET_RAW = 1500` (to be replaced after real sensor calibration).
+   - `to_utc()`: naive timestamps treated as UTC; timezone-aware timestamps converted to UTC before saving.
+   - `moisture_percent` is stored with every reading and returned in the POST response.
+
+7. **Missing Data Status (`routers/fields.py`)**:
+   - `GET /fields/{id}/latest-reading`: returns `field_id`, `status`, `message`, `moisture_percent`, `time`, and `age_minutes`.
+   - Four statuses: `no_sensor` (field has no sensor), `no_data` (sensor registered but no readings yet), `stale` (latest reading older than `STALE_AFTER_MINUTES = 15`), `ok`.
+   - Reading fields are always `null` when there is no reading — no made-up values.
+
+8. **Sensor Simulator (`fake_sensor.py`)**:
+   - Simulates a capacitive moisture sensor: starts at raw ~2500, drifts up slowly (drying), with ~10% chance of a large drop (irrigation event).
+   - CLI flags: `--device-id` (default `ESP32-001`), `--interval` (default 5s), `--url`, `--skip-chance` (0.0–1.0, simulates dropouts), `--stop-after` (auto-stop after N sent readings).
+   - Prints timestamp, raw value, moisture %, and HTTP status each cycle. Fails gracefully if the server is down.
+
+---
+
+### Verification
+- `GET /health` returned `{"status": "ok"}` immediately after server start.
+- Registered a test field via `POST /fields` at `/docs`; confirmed 201 response and correct `growth_stage`.
+- Duplicate `device_id` on a second field returned 409 as expected.
+- Ran `fake_sensor.py` for 20 readings; all saved with correct `moisture_percent` values.
+- `GET /sensor-readings/ESP32-001` returned 20 readings ordered newest first.
+- `GET /fields/1/latest-reading` returned status `ok` during active simulation and `stale` after pausing.
+- Duplicate timestamp injection via `/docs` returned 409 without crashing the server.
+- Out-of-range `raw_value` (e.g. 5000) returned 422 with a plain error message.
+
+---
+
+### What's Next
+- Connect the frontend (`riego/lib/api.ts`) to the live `/fields` and `/sensor-readings` endpoints, replacing in-memory mock data.
+- Integrate OpenWeatherMap for weather data ingestion.
+- Calibrate `DRY_RAW` and `WET_RAW` with real sensor measurements.
+- Add a manual reading entry route for fields without a sensor.
