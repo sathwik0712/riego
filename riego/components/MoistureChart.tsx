@@ -16,12 +16,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Field, MoistureHistory, MoistureTarget } from "../lib/types";
+import { Field, BackendField, MoistureHistory, MoistureTarget } from "../lib/types";
 
 interface MoistureChartProps {
   history: MoistureHistory[];
   target: MoistureTarget;
-  fields: Field[];
+  fields: (Field | BackendField)[];
 }
 
 // Preset visual styles for field lines
@@ -43,15 +43,16 @@ export default function MoistureChart({
   }, []);
 
   // Map field id to field data for crop name and label
-  const fieldMap = new Map(fields.map((f) => [f.id, f]));
+  const fieldMap = new Map(fields.map((f) => [String(f.id), f]));
 
   // Build field configs with style metadata
   const configs = history.map((h, index) => {
     const style = FIELD_STYLES[index % FIELD_STYLES.length];
-    const field = fieldMap.get(h.fieldId);
+    const field = fieldMap.get(String(h.fieldId));
+    const fieldName = (field && "nickname" in field && field.nickname) ? field.nickname : (field && "name" in field ? field.name : `Field ${index + 1}`);
     return {
       fieldId: h.fieldId,
-      name: field?.name || `Field ${index + 1}`,
+      name: fieldName,
       crop: field?.crop || "Crop",
       color: style.color,
       strokeDasharray: style.strokeDasharray,

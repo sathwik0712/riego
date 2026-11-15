@@ -1,21 +1,25 @@
 // Reusable Field Card component
-// Displays field name, crop, moisture progress bar with percentage
-// Uses triple visual cue: colour + icon + text (Good / Okay / Dry)
-// Desktop: 7-day sparkline, and a 2-col x 3-row grid with label on top, value below
-// Responsive: Phone & tablet maintain clean compact view
+// Displays field name/nickname, crop, soil moisture progress bar, and operational status
+// Responsive: compact view on phone/tablet, expanded details on desktop
 
 import { STRINGS } from "../lib/strings";
-import { Field, MoistureStatus } from "../lib/types";
+import { Field, BackendField, FieldConditions } from "../lib/types";
+import { getFieldMoistureDisplay } from "../lib/fieldStatus";
+import { ClockIcon } from "./icons";
 import Sparkline from "./Sparkline";
 
 interface FieldCardProps {
-  field: Field;
+  field: Field | BackendField;
+  conditions?: FieldConditions | null;
+  conditionsError?: boolean;
 }
 
 // Format sowing date as "14 Oct 2026"
-function formatSownDate(dateStr: string): string {
+function formatSownDate(dateStr?: string | null): string {
+  if (!dateStr) return "Not sown yet";
   try {
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString("en-IN", {
       day: "numeric",
       month: "short",
@@ -26,142 +30,161 @@ function formatSownDate(dateStr: string): string {
   }
 }
 
-// Visual configuration for each moisture status
-const STATUS_CONFIG: Record<
-  MoistureStatus,
-  {
-    label: string;
-    icon: string;
-    bulletEmoji: string;
-    barColor: string;
-    badgeBg: string;
-    badgeBorder: string;
-    textColor: string;
-  }
-> = {
-  good: {
-    label: STRINGS.statusGood,
-    icon: "✓",
-    bulletEmoji: "🟢",
-    barColor: "bg-[#2E7D32]",
-    badgeBg: "bg-[#EAF5EB]",
-    badgeBorder: "border-[#A3D9A5]",
-    textColor: "text-[#1E5128]",
-  },
-  okay: {
-    label: STRINGS.statusOkay,
-    icon: "⚠",
-    bulletEmoji: "🟡",
-    barColor: "bg-[#D97706]",
-    badgeBg: "bg-[#FEF3C7]",
-    badgeBorder: "border-[#FCD34D]",
-    textColor: "text-[#92400E]",
-  },
-  dry: {
-    label: STRINGS.statusDry,
-    icon: "!",
-    bulletEmoji: "🔴",
-    barColor: "bg-[#DC2626]",
-    badgeBg: "bg-[#FEE2E2]",
-    badgeBorder: "border-[#FCA5A5]",
-    textColor: "text-[#991B1B]",
-  },
-};
+export default function FieldCard({ field, conditions, conditionsError }: FieldCardProps) {
+  // Determine if this is a real BackendField or legacy mock Field
+  const isBackend = "latitude" in field || "registered_at" in field;
+  
+  // Field display metadata
+  const fieldName = (isBackend && (field as BackendField).nickname?.trim())
+    ? (field as BackendField).nickname!
+    : ("name" in field ? field.name : `Field ${field.id}`);
 
-export default function FieldCard({ field }: FieldCardProps) {
-  const status = STATUS_CONFIG[field.status] || STATUS_CONFIG.good;
-  // Ensure percentage stays between 0 and 100
-  const clampedPercentage = Math.min(Math.max(field.moisturePercentage, 0), 100);
+  const crop = field.crop;
+  const areaText = isBackend
+    ? `${(field as BackendField).area} ${(field as BackendField).area_unit}`
+    : (field as Field).area || "2.5 acres";
+
+  const growthStageText = isBackend
+    ? ((field as BackendField).growth_stage || "Planning stage")
+    : (field as Field).growthStage || "Vegetative";
+
+  const sownDateText = formatSownDate(
+    isBackend ? (field as BackendField).sowing_date : (field as Field).sownDate
+  );
+
+  const hasSensor = isBackend
+    ? (field as BackendField).has_sensor
+    : Boolean((field as Field).sensorStatus);
+
+  // Status computation via shared fieldStatus helper
+  const status = isBackend || conditions !== undefined || conditionsError
+    ? getFieldMoistureDisplay(conditions, conditionsError)
+    : {
+        level: (field as Field).status || "good",
+        label: (field as Field).status === "dry" ? STRINGS.statusDry : (field as Field).status === "okay" ? STRINGS.statusOkay : STRINGS.statusGood,
+        icon: (field as Field).status === "dry" ? "!" : (field as Field).status === "okay" ? "⚠" : "✓",
+        barColor: (field as Field).status === "dry" ? "bg-[#DC2626]" : (field as Field).status === "okay" ? "bg-[#D97706]" : "bg-[#2E7D32]",
+        badgeBg: (field as Field).status === "dry" ? "bg-[#FEE2E2]" : (field as Field).status === "okay" ? "bg-[#FEF3C7]" : "bg-[#EAF5EB]",
+        badgeBorder: (field as Field).status === "dry" ? "border-[#FCA5A5]" : (field as Field).status === "okay" ? "border-[#FCD34D]" : "border-[#A3D9A5]",
+        textColor: (field as Field).status === "dry" ? "text-[#991B1B]" : (field as Field).status === "okay" ? "text-[#92400E]" : "text-[#1E5128]",
+        isStale: false,
+        staleLabel: "",
+        moisturePercent: (field as Field).moisturePercentage ?? 65,
+      };
+
+  const hasPercent = status.moisturePercent !== null;
+  const clampedPercentage = hasPercent ? Math.min(Math.max(status.moisturePercent!, 0), 100) : 0;
 
   return (
     <article className="w-full h-full flex flex-col justify-between bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-[#DCD6C0] hover:shadow-md transition-shadow">
-      {/* ── Top section: Header & Progress Bar (shared across all devices) ── */}
+      {/* ── Top section: Header & Progress Bar ── */}
       <div>
-        {/* Header: Field Name, Crop, and Triple Status Indicator */}
+        {/* Header: Field Name, Crop, and Status Badges */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl" aria-hidden="true">
-              {status.bulletEmoji}
-            </span>
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#FAF7EE] border border-[#DCD6C0] flex items-center justify-center text-sm font-bold text-[#235334] shrink-0">
+              {String(field.id).slice(-3)}
+            </div>
             <div>
               <h3 className="text-xl font-semibold text-[#1B2D21] leading-tight">
-                {field.name}
+                {fieldName}
               </h3>
               <p className="text-sm text-[#5F6E62] mt-0.5">
-                🌾 {field.crop}
+                {crop}
               </p>
             </div>
           </div>
 
-          {/* Status Badge: Icon + Word in sentence case */}
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full border ${status.badgeBg} ${status.badgeBorder} ${status.textColor} shrink-0 text-sm font-semibold`}
-          >
-            <span aria-hidden="true">{status.icon}</span>
-            <span>{status.label}</span>
+          {/* Status Badges: Level badge & optional Old Reading badge */}
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full border ${status.badgeBg} ${status.badgeBorder} ${status.textColor} text-sm font-semibold`}
+            >
+              <span aria-hidden="true">{status.icon}</span>
+              <span>{status.label}</span>
+            </div>
+
+            {status.isStale && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D]">
+                <ClockIcon className="w-3 h-3" />
+                <span>Old reading</span>
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Moisture row with the progress bar */}
+        {/* Moisture row with progress bar */}
         <div className="mt-5 pt-4 border-t border-[#F2EFE4]">
           <div className="flex justify-between items-baseline mb-2">
             <span className="text-sm text-[#5F6E62]">
               {STRINGS.moistureLabel}
             </span>
             <span className="text-xl font-bold text-[#1B2D21]">
-              {clampedPercentage}%
+              {hasPercent ? (
+                `${clampedPercentage}%`
+              ) : status.level === "no_reading" ? (
+                <span className="text-sm font-semibold text-[#5F6E62]">No reading yet</span>
+              ) : (
+                <span className="text-sm font-semibold text-[#991B1B]">Could not load</span>
+              )}
             </span>
           </div>
 
           {/* Progress Bar Container */}
           <div
             role="progressbar"
-            aria-valuenow={clampedPercentage}
+            aria-valuenow={hasPercent ? clampedPercentage : 0}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`${field.name} soil moisture ${clampedPercentage}%`}
+            aria-label={`${fieldName} soil moisture ${hasPercent ? clampedPercentage + "%" : "unavailable"}`}
             className="w-full h-3 bg-[#EFEAD8] rounded-full overflow-hidden border border-[#DCD6C0]"
           >
             <div
               className={`h-full ${status.barColor} transition-all duration-500 rounded-full`}
-              style={{ width: `${clampedPercentage}%` }}
+              style={{ width: `${hasPercent ? clampedPercentage : 0}%` }}
             />
           </div>
         </div>
       </div>
 
-      {/* ── Desktop-only details: flat layout with thin divider lines (hidden on phone & tablet) ── */}
+      {/* ── Desktop-only details ── */}
       <div className="hidden lg:flex lg:flex-col gap-3 mt-4">
-        {/* 7-day trend as a plain line with label on the left (no box) */}
+        {/* 7-day trend sparkline */}
         <div className="pt-3 border-t border-[#F2EFE4] flex items-center justify-between">
           <span className="text-sm text-[#5F6E62]">7-day trend</span>
           <Sparkline
             data={
-              field.history && field.history.length > 0
-                ? field.history
-                : [60, 62, 65, 68, 70, 75, clampedPercentage]
+              "history" in field && field.history && field.history.length > 0
+                ? field.history.map((h: any) => h.moisture ?? h)
+                : hasPercent
+                  ? [50, 52, 55, 58, 60, 62, clampedPercentage]
+                  : [50, 50, 50, 50, 50, 50, 50]
             }
             width={96}
             height={28}
             color={
-              field.status === "dry"
+              status.level === "dry"
                 ? "#DC2626"
-                : field.status === "okay"
+                : status.level === "okay"
                   ? "#D97706"
-                  : "#2E7D32"
+                  : status.level === "good"
+                    ? "#2E7D32"
+                    : "#5F6E62"
             }
             min={0}
             max={100}
           />
         </div>
 
-        {/* 2-column x 3-row grid: label on top (text-sm muted), value below (text-base semibold) */}
+        {/* 2-column x 3-row detail grid */}
         <div className="pt-3 border-t border-[#F2EFE4] grid grid-cols-2 grid-rows-3 grid-flow-col gap-x-4 gap-y-2.5 text-sm">
-          {/* Col 1, Row 1: Sensor */}
+          {/* Sensor status */}
           <div>
             <p className="text-sm text-[#5F6E62]">Sensor</p>
             <div className="mt-0.5">
-              {field.sensorStatus === "stale" ? (
+              {!hasSensor ? (
+                <span className="text-sm text-[#5F6E62] font-medium">None</span>
+              ) : status.isStale ? (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-sm font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D] whitespace-nowrap">
                   <span aria-hidden="true">⚠</span> Stale
                 </span>
@@ -173,45 +196,47 @@ export default function FieldCard({ field }: FieldCardProps) {
             </div>
           </div>
 
-          {/* Col 1, Row 2: Last reading */}
+          {/* Last reading */}
           <div>
             <p className="text-sm text-[#5F6E62]">Last reading</p>
             <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {field.lastReadingMinutes !== undefined
-                ? `${field.lastReadingMinutes} min ago`
-                : "5 min ago"}
+              {conditions?.soil_moisture?.measured_at
+                ? "Recent"
+                : "No data"}
             </p>
           </div>
 
-          {/* Col 1, Row 3: Next watering */}
-          <div>
-            <p className="text-sm text-[#5F6E62]">Next watering</p>
-            <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {field.nextWateringTime || "6:00 AM"}
-            </p>
-          </div>
-
-          {/* Col 2, Row 1: Stage */}
-          <div>
-            <p className="text-sm text-[#5F6E62]">Stage</p>
-            <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {field.growthStage || "Vegetative · day 32"}
-            </p>
-          </div>
-
-          {/* Col 2, Row 2: Sown */}
+          {/* Sowing date */}
           <div>
             <p className="text-sm text-[#5F6E62]">Sown</p>
             <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {field.sownDate ? formatSownDate(field.sownDate) : "14 Oct 2026"}
+              {sownDateText}
             </p>
           </div>
 
-          {/* Col 2, Row 3: Area */}
+          {/* Crop stage */}
+          <div>
+            <p className="text-sm text-[#5F6E62]">Stage</p>
+            <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
+              {growthStageText}
+            </p>
+          </div>
+
+          {/* Area */}
           <div>
             <p className="text-sm text-[#5F6E62]">Area</p>
             <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {field.area || "2.5 acres"}
+              {areaText}
+            </p>
+          </div>
+
+          {/* Device ID / Telemetry */}
+          <div>
+            <p className="text-sm text-[#5F6E62]">Device</p>
+            <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
+              {isBackend && (field as BackendField).device_id
+                ? (field as BackendField).device_id
+                : "—"}
             </p>
           </div>
         </div>

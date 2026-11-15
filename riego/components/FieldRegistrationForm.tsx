@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FieldFormData } from "../lib/types";
+import { FieldFormData, FieldCreateData } from "../lib/types";
 import {
   areaUnitOptions,
   cropOptions,
@@ -16,6 +16,7 @@ import {
   waterSourceOptions,
 } from "../lib/sampleData";
 import { createField } from "../lib/api";
+import { AlertIcon } from "./icons";
 
 // Step titles and icons for the progress indicator
 const STEP_CONFIG = [
@@ -47,6 +48,30 @@ function calculateGrowthStage(sowingDate: string, notSownYet: boolean): string {
   }
 }
 
+// Helper: Extract latitude and longitude from location string, or fallback to farm default
+function parseCoordinates(locationStr: string): { latitude: number; longitude: number } {
+  // If the location string contains coordinates like "(13.0827° N, 77.5877° E)", extract them
+  const match = locationStr.match(/(\d+\.\d+)[^\d]+(\d+\.\d+)/);
+  if (match) {
+    const lat = parseFloat(match[1]);
+    const lon = parseFloat(match[2]);
+    if (!isNaN(lat) && !isNaN(lon)) {
+      return { latitude: lat, longitude: lon };
+    }
+  }
+  // Fixed default coordinate for Karnataka farm region (Hebballi: 13.0827° N, 77.5877° E)
+  return { latitude: 13.0827, longitude: 77.5877 };
+}
+
+// Helper: Map UI water source label to backend allowed values ("Borewell" | "Canal" | "Tank" | "Rain-fed")
+function mapWaterSource(src: string): string {
+  if (src.includes("Rain-fed")) return "Rain-fed";
+  if (src.includes("Tank")) return "Tank";
+  if (src.includes("Canal")) return "Canal";
+  if (src.includes("Borewell")) return "Borewell";
+  return src;
+}
+
 export default function FieldRegistrationForm() {
   // Current active step (1 to 5)
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -56,6 +81,12 @@ export default function FieldRegistrationForm() {
 
   // Validation error message for the current step
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Loading state while saving to FastAPI backend
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Server error message if save fails
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // State to display the post-save success screen
   const [isSaved, setIsSaved] = useState<boolean>(false);
@@ -149,18 +180,57 @@ export default function FieldRegistrationForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1));
   };
 
-  // Screen 5: Save field in memory and show success screen
+  // Screen 5: Save field to FastAPI backend and show success screen
   const handleSaveField = async () => {
-    const stage = calculateGrowthStage(formData.sowingDate, formData.notSownYet);
-    const finalData: FieldFormData = {
-      ...formData,
-      growthStage: stage,
-      registrationDate: new Date().toISOString().split("T")[0],
-    };
+    setIsSaving(true);
+    setSaveError(null);
 
-    // Save into in-memory sample fields
-    await createField(finalData);
-    setIsSaved(true);
+    try {
+      // 1. Coordinates: parse from location string or fallback to default coordinates
+      const coords = parseCoordinates(formData.location);
+
+      // 2. Map water source to allowed backend enum ("Borewell" | "Canal" | "Tank" | "Rain-fed")
+      const waterSource = mapWaterSource(formData.waterSource);
+
+      // 3. Optional pump flow rate
+      const pumpFlowRate = formData.pumpFlowRateUnknown || !formData.pumpFlowRate
+        ? null
+        : Number(formData.pumpFlowRate);
+
+      // 4. Sowing date (null if not sown yet)
+      const sowingDate = formData.notSownYet || !formData.sowingDate
+        ? null
+        : formData.sowingDate;
+
+      // 5. Sensor and device ID (null if no sensor)
+      const hasSensor = Boolean(formData.hasSensor);
+      const deviceId = hasSensor && formData.deviceId.trim() ? formData.deviceId.trim() : null;
+
+      // 6. Farmer: uses seeded farmer "farmer_001" for now; will use logged-in farmer when real login is connected
+      const payload: FieldCreateData = {
+        nickname: formData.nickname.trim() || null,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        area: Number(formData.areaSize),
+        area_unit: formData.areaUnit,
+        crop: formData.cropName.trim(),
+        sowing_date: sowingDate,
+        soil_type: formData.soilType,
+        water_source: waterSource,
+        irrigation_method: formData.irrigationMethod,
+        pump_flow_rate: pumpFlowRate,
+        has_sensor: hasSensor,
+        device_id: deviceId,
+      };
+
+      await createField(payload);
+      setIsSaved(true);
+    } catch (err: any) {
+      // Backend validation errors (e.g. duplicate device ID) are presented as a short plain sentence
+      setSaveError(err?.message || "Something went wrong. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Reset form to register another field
@@ -173,6 +243,7 @@ export default function FieldRegistrationForm() {
     setCurrentStep(1);
     setIsSaved(false);
     setErrorMessage(null);
+    setSaveError(null);
   };
 
   // -------------------------------------------------------------
@@ -1074,6 +1145,17 @@ export default function FieldRegistrationForm() {
             </p>
           </div>
 
+          {/* Plain error banner with AlertIcon if saving failed */}
+          {saveError && (
+            <div
+              role="alert"
+              className="p-4 rounded-2xl bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] text-sm flex items-center gap-3"
+            >
+              <AlertIcon className="w-5 h-5 shrink-0 text-[#DC2626]" />
+              <p className="font-semibold">{saveError}</p>
+            </div>
+          )}
+
           {/* Automatic metadata card */}
           <div className="p-4 rounded-2xl bg-[#EFEAD8] border border-[#D1CAAD] flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
             <span className="font-bold text-[#1B2D21] flex items-center gap-1.5">
@@ -1286,12 +1368,16 @@ export default function FieldRegistrationForm() {
         ) : (
           <button
             type="button"
+            disabled={isSaving}
             onClick={handleSaveField}
-            className="flex-1 min-h-[56px] px-6 py-3 rounded-2xl bg-[#235334] text-[#FAF7EE] hover:bg-[#1A3E27] font-bold text-base sm:text-lg flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all cursor-pointer"
+            className={`flex-1 min-h-[56px] px-6 py-3 rounded-2xl font-bold text-base sm:text-lg flex items-center justify-center gap-2 shadow-sm transition-all ${
+              isSaving
+                ? "bg-[#5F6E62] text-[#FAF7EE] opacity-75 cursor-not-allowed"
+                : "bg-[#235334] text-[#FAF7EE] hover:bg-[#1A3E27] active:scale-95 cursor-pointer"
+            }`}
           >
-            <span aria-hidden="true">💾</span>
-            <span>Save Field</span>
-            <span aria-hidden="true">✓</span>
+            <span>{isSaving ? "Saving..." : "Save Field"}</span>
+            {!isSaving && <span aria-hidden="true">✓</span>}
           </button>
         )}
       </div>

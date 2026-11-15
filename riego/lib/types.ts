@@ -157,5 +157,73 @@ export interface SignupFormData {
   preferredLanguage: string; // "en" | "hi" | "kn"
 }
 
+// -------------------------------------------------------------
+// Real backend telemetry and field schemas (FastAPI)
+// -------------------------------------------------------------
+
+// Real field record returned by GET /fields and POST /fields
+export interface BackendField {
+  id: number;
+  farmer_id: string;
+  nickname?: string | null;
+  latitude: number;
+  longitude: number;
+  area: number;
+  area_unit: "acres" | "guntas" | string;
+  crop: string;
+  sowing_date?: string | null; // "YYYY-MM-DD"
+  soil_type: string;
+  water_source: string;
+  irrigation_method: string;
+  pump_flow_rate?: number | null;
+  has_sensor: boolean;
+  device_id?: string | null;
+  registered_at: string;
+  growth_stage: string;
+}
+
+// Request payload for creating a new field via POST /fields
+export interface FieldCreateData {
+  nickname?: string | null;
+  latitude: number;
+  longitude: number;
+  area: number;
+  area_unit: "acres" | "guntas" | string;
+  crop: string;
+  sowing_date?: string | null;
+  soil_type: string;
+  water_source: string;
+  irrigation_method: string;
+  pump_flow_rate?: number | null;
+  has_sensor: boolean;
+  device_id?: string | null;
+}
+
+// Aggregate field conditions from GET /fields/{field_id}/conditions
+export interface FieldConditions {
+  field_id: number;
+  nickname?: string | null;
+  crop: string;
+  days_since_sowing?: number | null;
+  soil_moisture: {
+    status: "good" | "okay" | "dry" | "stale" | "no_data" | string;
+    message: string;
+    moisture_percent?: number | null;
+    level?: "dry" | "okay" | "good" | null;
+    measured_at?: string | null;
+    device_id?: string | null;
+  };
+  weather: {
+    available: boolean;
+    current?: any;
+    forecast?: any[];
+    rain_expected_soon?: boolean | null;
+    rain_total_mm_next_2_days?: number | null;
+    message?: string | null;
+  };
+  notes: string[];
+}
+
+
 
 

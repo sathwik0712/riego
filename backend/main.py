@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from database import engine, SessionLocal, Base
 import models
@@ -7,6 +8,8 @@ from routers.fields import router as fields_router
 from routers.sensor_readings import router as sensor_readings_router
 from routers.auth import router as auth_router
 from routers.weather import router as weather_router
+from routers.recommendations import router as recommendations_router
+from routers.irrigation_log import router as irrigation_log_router
 
 # Lifespan event handler to create tables, seed data, and set up hypertable
 @asynccontextmanager
@@ -56,11 +59,25 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI application
 app = FastAPI(title="Riego API", lifespan=lifespan)
 
+# Real site address is added when deploying
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # Include API routers
 app.include_router(fields_router)
 app.include_router(sensor_readings_router)
 app.include_router(auth_router)
 app.include_router(weather_router)
+app.include_router(recommendations_router)
+app.include_router(irrigation_log_router)
 
 # Health check route
 @app.get("/health")

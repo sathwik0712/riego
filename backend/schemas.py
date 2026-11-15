@@ -1,6 +1,6 @@
 import re
 from datetime import date, datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 from growth import get_growth_stage
 
@@ -17,6 +17,10 @@ VALID_AREA_UNITS = {"acres", "guntas"}
 VALID_SOIL_TYPES = {"Sandy", "Loamy", "Clay"}
 VALID_WATER_SOURCES = {"Borewell", "Canal", "Tank", "Rain-fed"}
 VALID_IRRIGATION_METHODS = {"Drip", "Sprinkler", "Flood"}
+VALID_RECOMMENDATION_ACTIONS = {"water", "wait"}
+VALID_RECOMMENDATION_STATUSES = {"pending", "done", "skipped"}
+VALID_RECOMMENDATION_SOURCES = {"rule", "ml"}
+VALID_IRRIGATION_LOG_SOURCES = {"farmer", "auto"}
 
 
 class FieldCreate(BaseModel):
@@ -371,6 +375,161 @@ class FarmerOut(BaseModel):
     village: str
     preferred_language: str
     created_at: datetime
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
+# Recommendation creation schema with input validation
+class RecommendationCreate(BaseModel):
+    field_id: int
+    advice_text: str
+    action: str
+    water_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    source: Optional[str] = "rule"
+    status: Optional[str] = "pending"
+
+    # Advice text cannot be empty
+    @field_validator("advice_text")
+    @classmethod
+    def validate_advice_text(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        if not v:
+            raise ValueError("Advice text cannot be empty")
+        return v
+
+    # Action must be "water" or "wait"
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in VALID_RECOMMENDATION_ACTIONS:
+            raise ValueError("Action must be 'water' or 'wait'")
+        return v
+
+    # Duration minutes between 1 and 600 if provided
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration(cls, v):
+        if v is not None and (v < 1 or v > 600):
+            raise ValueError("Duration minutes must be between 1 and 600")
+        return v
+
+    # Source must be "rule" or "ml"
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v):
+        if v is None:
+            return "rule"
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in VALID_RECOMMENDATION_SOURCES:
+            raise ValueError("Source must be 'rule' or 'ml'")
+        return v
+
+    # Status must be "pending", "done" or "skipped"
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v is None:
+            return "pending"
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in VALID_RECOMMENDATION_STATUSES:
+            raise ValueError("Status must be 'pending', 'done' or 'skipped'")
+        return v
+
+
+# Recommendation output schema
+class RecommendationOut(BaseModel):
+    id: int
+    field_id: int
+    created_at: datetime
+    advice_text: str
+    action: str
+    water_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    source: str
+    status: str
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
+# Irrigation log creation schema with input validation
+class IrrigationLogCreate(BaseModel):
+    field_id: int
+    started_at: Optional[datetime] = None
+    duration_minutes: int
+    water_liters: Optional[float] = None
+    source: Optional[str] = "farmer"
+    recommendation_id: Optional[int] = None
+
+    # Duration minutes between 1 and 600
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration(cls, v):
+        if v < 1 or v > 600:
+            raise ValueError("Duration minutes must be between 1 and 600")
+        return v
+
+    # Water liters not negative
+    @field_validator("water_liters")
+    @classmethod
+    def validate_water_liters(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Water liters cannot be negative")
+        return v
+
+    # Source must be "farmer" or "auto"
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v):
+        if v is None:
+            return "farmer"
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in VALID_IRRIGATION_LOG_SOURCES:
+            raise ValueError("Source must be 'farmer' or 'auto'")
+        return v
+
+
+# Irrigation log output schema
+class IrrigationLogOut(BaseModel):
+    id: int
+    field_id: int
+    started_at: datetime
+    duration_minutes: int
+    water_liters: Optional[float] = None
+    source: str
+    recommendation_id: Optional[int] = None
+    created_at: datetime
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
+# Irrigation log history query response
+class IrrigationLogHistoryOut(BaseModel):
+    field_id: int
+    days: int
+    count: int
+    logs: List[IrrigationLogOut]
 
     if IS_V2:
         model_config = ConfigDict(from_attributes=True)
