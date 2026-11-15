@@ -5,12 +5,11 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 from schemas import FieldCreate, FieldOut
+from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
+from services.conditions import get_field_conditions
 
 # APIRouter for field-related endpoints
 router = APIRouter(prefix="/fields", tags=["Fields"])
-
-# Readings older than this many minutes are considered stale
-STALE_AFTER_MINUTES = 15
 
 # Create a new field
 @router.post("", response_model=FieldOut, status_code=status.HTTP_201_CREATED)
@@ -77,53 +76,36 @@ def get_latest_reading(field_id: int, db: Session = Depends(get_db)):
             detail=f"Field with ID {field_id} not found."
         )
 
-    # No sensor registered on this field
-    if not field.has_sensor:
-        return {
-            "field_id": field_id,
-            "status": "no_sensor",
-            "message": "This field has no sensor installed.",
-            "moisture_percent": None,
-            "time": None,
-            "age_minutes": None,
-        }
-
-    # Fetch the most recent reading for this field's device
-    latest = (
-        db.query(models.SensorReading)
-        .filter(models.SensorReading.device_id == field.device_id)
-        .order_by(models.SensorReading.time.desc())
-        .first()
-    )
-
-    # Sensor exists but no readings recorded yet
-    if latest is None:
-        return {
-            "field_id": field_id,
-            "status": "no_data",
-            "message": "Sensor is registered but no readings have been received yet.",
-            "moisture_percent": None,
-            "time": None,
-            "age_minutes": None,
-        }
-
-    # Calculate how old the latest reading is
-    now = datetime.now(timezone.utc)
-    reading_time = latest.time if latest.time.tzinfo else latest.time.replace(tzinfo=timezone.utc)
-    age_minutes = round((now - reading_time).total_seconds() / 60, 1)
-
-    reading_status = "stale" if age_minutes > STALE_AFTER_MINUTES else "ok"
-    message = (
-        f"Last reading is {age_minutes} minutes old and may not reflect current conditions."
-        if reading_status == "stale"
-        else "Sensor is active and reporting current readings."
-    )
-
+    reading = get_field_latest_sensor_reading(db, field)
     return {
         "field_id": field_id,
-        "status": reading_status,
-        "message": message,
-        "moisture_percent": latest.moisture_percent,
-        "time": reading_time,
-        "age_minutes": age_minutes,
+        "status": reading["status"],
+        "message": reading["message"],
+        "moisture_percent": reading["moisture_percent"],
+        "time": reading["time"],
+        "age_minutes": reading["age_minutes"],
     }
+
+# Get combined conditions (soil moisture, weather, crop, notes) for a field
+@router.get("/{field_id}/conditions")
+def get_field_conditions_endpoint(field_id: int, db: Session = Depends(get_db)):
+    """
+    Get aggregated field telemetry and current conditions:
+    soil moisture, weather snapshot, days since sowing, and notices.
+    """
+    # 404 if the field does not exist
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Field not found"
+        )
+
+    try:
+        return get_field_conditions(db, field)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while gathering field conditions."
+        )
+

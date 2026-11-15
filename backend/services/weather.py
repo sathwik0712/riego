@@ -1,11 +1,14 @@
 """Weather service client for OpenWeatherMap API."""
 
 import os
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 import httpx
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+import models
 
 # Resolve path to backend/.env
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -241,3 +244,75 @@ def get_forecast(lat: float, lon: float) -> List[Dict[str, Any]]:
         })
 
     return forecast_results
+
+
+# In-memory cache for weather results: (lat_round, lon_round) -> (timestamp, data)
+# Note: This cache sits in front of the weather_readings history table and preserves the 5-day forecast (which is not stored in the database).
+CACHE_TTL_SECONDS = 600  # 10 minutes
+_weather_cache: Dict[Tuple[float, float], Tuple[float, Dict[str, Any]]] = {}
+
+
+def fetch_field_weather(db: Session, field: Any) -> Dict[str, Any]:
+    """
+    Get current weather and 5-day forecast for a field with 10-minute in-memory cache
+    and history persistence to weather_readings on fresh fetches.
+    Raises WeatherUnavailable if the external API call fails on a cache miss.
+    """
+    cache_key = (round(field.latitude, 2), round(field.longitude, 2))
+    now = time.time()
+
+    if cache_key in _weather_cache:
+        cached_time, cached_data = _weather_cache[cache_key]
+        if now - cached_time < CACHE_TTL_SECONDS:
+            return {
+                "current": cached_data["current"],
+                "forecast": cached_data["forecast"],
+            }
+
+    # Cache miss: fetch fresh weather from OpenWeatherMap
+    current = get_current_weather(field.latitude, field.longitude)
+    forecast = get_forecast(field.latitude, field.longitude)
+
+    # Save to in-memory cache
+    _weather_cache[cache_key] = (now, {"current": current, "forecast": forecast})
+
+    # Save current weather reading to history if not recently recorded (< 10 min)
+    try:
+        now_utc = datetime.now(timezone.utc)
+        latest_reading = (
+            db.query(models.WeatherReading)
+            .filter(models.WeatherReading.field_id == field.id)
+            .order_by(models.WeatherReading.recorded_at.desc())
+            .first()
+        )
+
+        should_save = True
+        if latest_reading and latest_reading.recorded_at:
+            recorded_at = latest_reading.recorded_at
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=timezone.utc)
+            if (now_utc - recorded_at) < timedelta(minutes=10):
+                should_save = False
+
+        if should_save:
+            weather_entry = models.WeatherReading(
+                field_id=field.id,
+                recorded_at=now_utc,
+                temperature_c=float(current.get("temperature_c", 0.0)),
+                humidity_percent=float(current.get("humidity_percent", 0.0)),
+                wind_speed_ms=float(current.get("wind_speed_ms", 0.0)),
+                rain_mm_last_hour=float(current.get("rain_mm_last_hour", 0.0)),
+                is_raining=bool(current.get("is_raining", False)),
+                description=str(current.get("description", "")),
+            )
+            db.add(weather_entry)
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Notice: Failed to persist weather reading to history: {e}")
+
+    return {
+        "current": current,
+        "forecast": forecast,
+    }
+

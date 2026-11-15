@@ -318,5 +318,25 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 ### What's Next
 - Task 5, combine sensor and weather data.
 
+---
+
+## Session 10: Week 2 (16 November 2026) — Task 5: Combine Sensor and Weather Data
+
+### Backend
+- `backend/services/conditions.py`: `get_field_conditions` gathers, for one field, the latest soil moisture (with status ok, stale, no_data or no_sensor), current weather, 5-day forecast, days since sowing, and a list of plain notes for anything missing or old. Moisture and weather work independently, so one failing never breaks the other (FR-1.4, NFR-5).
+- Shared helpers so nothing is written twice: `services/sensor.py` (latest reading and stale rule) and `fetch_field_weather` in `services/weather.py` (10-minute cache and history saving). The weather and latest-reading endpoints behave exactly as before.
+- `GET /fields/{field_id}/conditions` returns it all in one response. Always 200 for an existing field, 404 for an unknown one.
+- Simple rules for now: moisture level dry (below 30), okay (30 to 59), good (60 and above), with the cut-offs as named constants; `rain_expected_soon` and `rain_total_mm_next_2_days` from today and tomorrow's forecast; a note when soil is dry but rain is expected.
+- Tested with fake weather data and real fields; test rows were deleted.
+
+### Not Done Yet
+- The moisture cut-offs and rain rules are plain rules. The ML engine replaces them later.
+- No watering advice is made yet.
+- Frontend does not call this endpoint yet (Task 6).
+
+### What's Next
+- Task 6, connect the frontend to the backend, add the manual reading entry screen, and add the recommendations and irrigation-log tables just before it.
+
+
 
 
