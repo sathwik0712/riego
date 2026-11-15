@@ -41,6 +41,16 @@ async def lifespan(app: FastAPI):
         # Log notice if hypertable already exists or non-critical error
         print(f"Hypertable creation notice: {e}")
 
+    # Convert weather_readings to a TimescaleDB hypertable on the 'recorded_at' column
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("SELECT create_hypertable('weather_readings', 'recorded_at', if_not_exists => TRUE);")
+            )
+    except Exception as e:
+        # Log notice if hypertable already exists or non-critical error
+        print(f"Weather hypertable creation notice: {e}")
+
     yield
 
 # Initialize FastAPI application

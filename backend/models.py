@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Index
 from sqlalchemy.sql import func
 from database import Base
 
@@ -75,3 +75,26 @@ class SensorReading(Base):
 
     # Moisture percentage (optional, calculated in later steps)
     moisture_percent = Column(Float, nullable=True)
+
+
+# Weather reading history: one row is saved each time fresh weather is fetched
+class WeatherReading(Base):
+    __tablename__ = "weather_readings"
+
+    # Composite primary key (recorded_at, field_id) required for TimescaleDB hypertable
+    recorded_at = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    field_id = Column(Integer, ForeignKey("fields.id"), primary_key=True, nullable=False)
+
+    # Weather telemetry metrics
+    temperature_c = Column(Float, nullable=False)
+    humidity_percent = Column(Float, nullable=False)
+    wind_speed_ms = Column(Float, nullable=False)
+    rain_mm_last_hour = Column(Float, nullable=False, default=0.0)
+    is_raining = Column(Boolean, nullable=False, default=False)
+    description = Column(String, nullable=True)
+
+    # Composite index to optimize retrieving the latest weather readings for a field (newest first)
+    __table_args__ = (
+        Index("ix_weather_readings_field_recorded_at", field_id, recorded_at.desc()),
+    )
+

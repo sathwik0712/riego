@@ -1,5 +1,6 @@
+from datetime import datetime, timezone, timedelta
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from database import get_db
@@ -65,6 +66,53 @@ def create_sensor_reading(reading_in: SensorReadingCreate, db: Session = Depends
         )
 
     return new_reading
+
+# Retrieve historical sensor readings for a field over the last N hours, oldest first
+@router.get("/{field_id}/history")
+def get_field_sensor_history(
+    field_id: int,
+    hours: int = Query(default=24, ge=1, le=720),
+    db: Session = Depends(get_db)
+):
+    """
+    Get saved historical sensor readings for a field over the last N hours (oldest first).
+    """
+    # 404 if the field does not exist
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Field not found"
+        )
+
+    # Fetch readings within the last N hours, ordered oldest first
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    readings = (
+        db.query(models.SensorReading)
+        .filter(
+            models.SensorReading.field_id == field.id,
+            models.SensorReading.time >= cutoff
+        )
+        .order_by(models.SensorReading.time.asc())
+        .all()
+    )
+
+    items = [
+        {
+            "time": r.time,
+            "moisture_percent": r.moisture_percent,
+            "raw_value": r.raw_value,
+            "device_id": r.device_id,
+        }
+        for r in readings
+    ]
+
+    return {
+        "field_id": field.id,
+        "hours": hours,
+        "count": len(items),
+        "readings": items,
+    }
 
 # Retrieve the latest 20 readings for a device, ordered newest first
 @router.get("/{device_id}", response_model=List[SensorReadingOut])

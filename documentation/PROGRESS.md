@@ -299,4 +299,24 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 ### What's Next
 - Task 4, historical data storage.
 
+---
+
+## Session 9: Week 2 (15 November 2026) — Task 4: Historical Data Storage
+
+### Backend
+- New `weather_readings` table (TimescaleDB hypertable, same pattern as `sensor_readings`): field, `recorded_at`, temperature, humidity, wind, rain in the last hour, `is_raining`, description. Index on field and time. Existing tables were not changed.
+- `GET /weather/{field_id}` now saves a reading each time fresh weather is fetched. No duplicate is saved within 10 minutes (also after a restart). If saving fails, the farmer still gets the weather. Nothing is saved when the weather service is down.
+- `GET /weather/{field_id}/history`: past weather for the last N hours (default 24, 1 to 720), oldest first, empty list when there is no data, 404 for an unknown field.
+- `GET /sensor-readings/{field_id}/history`: same style for soil moisture readings (this endpoint did not exist before).
+- All tested with temporary rows, which were deleted afterwards.
+
+### Not Done Yet
+- The 5-day forecast is not stored (it is still only in the 10-minute memory cache).
+- Weather is only saved when someone opens the weather endpoint. No background job saves it automatically yet.
+- No automatic deletion of old data.
+
+### What's Next
+- Task 5, combine sensor and weather data.
+
+
 
