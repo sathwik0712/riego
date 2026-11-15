@@ -2,14 +2,28 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, 
 from sqlalchemy.sql import func
 from database import Base
 
+
+# Farmer profile
+class Farmer(Base):
+    __tablename__ = "farmers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    farmer_id = Column(String, unique=True, nullable=False)          # e.g. "farmer_001"
+    name = Column(String, nullable=False)
+    phone = Column(String(10), unique=True, nullable=False)          # 10-digit phone
+    village = Column(String, nullable=False)
+    preferred_language = Column(String, nullable=False, default="en") # "en", "hi", or "kn"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Field(Base):
     __tablename__ = "fields"
 
     # Primary key (auto-incremented integer)
     id = Column(Integer, primary_key=True, index=True)
 
-    # Required farmer ID (defaults to "farmer_001")
-    farmer_id = Column(String, nullable=False, default="farmer_001")
+    # Required farmer ID, linked to farmers table
+    farmer_id = Column(String, ForeignKey("farmers.farmer_id"), nullable=False, default="farmer_001")
 
     # Optional nickname for the field
     nickname = Column(String, nullable=True)

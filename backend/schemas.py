@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel
@@ -269,6 +270,107 @@ class SensorReadingOut(BaseModel):
     field_id: int
     raw_value: int
     moisture_percent: Optional[float] = None
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
+
+# Allowed language choices
+VALID_LANGUAGES = {"en", "hi", "kn"}
+
+
+# Signup request
+class SignupRequest(BaseModel):
+    name: str
+    phone: str
+    village: str
+    preferred_language: str = "en"
+
+    # Name: trimmed, 2-60 chars
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if len(v) < 2 or len(v) > 60:
+            raise ValueError("Name must be 2-60 characters")
+        return v
+
+    # Phone: exactly 10 digits, starts with 6-9 (Indian mobile)
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        v = v.strip()
+        if not re.match(r"^[6-9]\d{9}$", v):
+            raise ValueError("Phone must be exactly 10 digits starting with 6-9")
+        return v
+
+    # Village: trimmed, 2-60 chars
+    @field_validator("village")
+    @classmethod
+    def validate_village(cls, v):
+        v = v.strip()
+        if len(v) < 2 or len(v) > 60:
+            raise ValueError("Village must be 2-60 characters")
+        return v
+
+    # Language: must be "en", "hi" or "kn"
+    @field_validator("preferred_language")
+    @classmethod
+    def validate_language(cls, v):
+        if v not in VALID_LANGUAGES:
+            raise ValueError("Language must be 'en', 'hi' or 'kn'")
+        return v
+
+
+# OTP request
+class OTPRequest(BaseModel):
+    phone: str
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        v = v.strip()
+        if not re.match(r"^[6-9]\d{9}$", v):
+            raise ValueError("Phone must be exactly 10 digits starting with 6-9")
+        return v
+
+
+# OTP verification
+class OTPVerify(BaseModel):
+    phone: str
+    otp: str
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        v = v.strip()
+        if not re.match(r"^[6-9]\d{9}$", v):
+            raise ValueError("Phone must be exactly 10 digits starting with 6-9")
+        return v
+
+    # OTP: exactly 6 digits
+    @field_validator("otp")
+    @classmethod
+    def validate_otp(cls, v):
+        v = v.strip()
+        if not re.match(r"^\d{6}$", v):
+            raise ValueError("OTP must be exactly 6 digits")
+        return v
+
+
+# Farmer output (safe subset of fields)
+class FarmerOut(BaseModel):
+    farmer_id: str
+    name: str
+    phone: str
+    village: str
+    preferred_language: str
+    created_at: datetime
 
     if IS_V2:
         model_config = ConfigDict(from_attributes=True)
