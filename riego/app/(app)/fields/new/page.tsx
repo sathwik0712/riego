@@ -2,7 +2,7 @@
 // Multi-step registration flow centered with max-width ~600px
 
 import Link from "next/link";
-import FieldRegistrationForm from "../../../components/FieldRegistrationForm";
+import FieldRegistrationForm from "@/components/FieldRegistrationForm";
 
 export const metadata = {
   title: "Register New Field - Riego",

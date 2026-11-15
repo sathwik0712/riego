@@ -10,15 +10,15 @@ import {
   getSummaryStats,
   getTodaySchedule,
   getWeather,
-} from "../lib/api";
-import { STRINGS } from "../lib/strings";
-import AdviceCard from "../components/AdviceCard";
-import WeatherStrip from "../components/WeatherStrip";
-import FieldCard from "../components/FieldCard";
-import SummaryTiles from "../components/SummaryTiles";
-import MoistureChart from "../components/MoistureChart";
-import SchedulePreview from "../components/SchedulePreview";
-import RecentAlerts from "../components/RecentAlerts";
+} from "@/lib/api";
+import { STRINGS } from "@/lib/strings";
+import AdviceCard from "@/components/AdviceCard";
+import WeatherStrip from "@/components/WeatherStrip";
+import FieldCard from "@/components/FieldCard";
+import SummaryTiles from "@/components/SummaryTiles";
+import MoistureChart from "@/components/MoistureChart";
+import SchedulePreview from "@/components/SchedulePreview";
+import RecentAlerts from "@/components/RecentAlerts";
 
 export default async function HomePage() {
   // Read all data in parallel (ready for FastAPI later)

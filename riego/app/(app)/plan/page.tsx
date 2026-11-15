@@ -2,7 +2,7 @@
 // Full timeline & irrigation scheduler will be built in Week 2
 
 import Link from "next/link";
-import { STRINGS } from "../../lib/strings";
+import { STRINGS } from "@/lib/strings";
 
 export default function PlanPage() {
   return (

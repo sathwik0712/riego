@@ -2,9 +2,9 @@
 // Displays all registered fields and a prominent "Add Field" button to register new fields
 
 import Link from "next/link";
-import { getFields } from "../../lib/api";
-import { STRINGS } from "../../lib/strings";
-import FieldCard from "../../components/FieldCard";
+import { getFields } from "@/lib/api";
+import { STRINGS } from "@/lib/strings";
+import FieldCard from "@/components/FieldCard";
 
 export const metadata = {
   title: "My Fields - Riego",

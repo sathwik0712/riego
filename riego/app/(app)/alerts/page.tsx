@@ -5,11 +5,11 @@
 // Uses shared design system: 4-tier type scale, rounded-3xl, p-6, 48px icon boxes, gap-4/gap-6
 
 import { useEffect, useState } from "react";
-import { getRecentAlerts } from "../../lib/api";
-import { sampleAlerts } from "../../lib/sampleData";
-import { STRINGS } from "../../lib/strings";
-import { Alert, AlertSeverity } from "../../lib/types";
-import { BellIcon, SpeakerIcon } from "../../components/icons";
+import { getRecentAlerts } from "@/lib/api";
+import { sampleAlerts } from "@/lib/sampleData";
+import { STRINGS } from "@/lib/strings";
+import { Alert, AlertSeverity } from "@/lib/types";
+import { BellIcon, SpeakerIcon } from "@/components/icons";
 
 // Visual configuration for alert severity levels
 const SEVERITY_CONFIG: Record<
