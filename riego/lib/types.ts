@@ -161,6 +161,22 @@ export interface SignupFormData {
 // Real backend telemetry and field schemas (FastAPI)
 // -------------------------------------------------------------
 
+// One raw reading returned by GET /sensor-readings/{field_id}/history
+export interface SensorReading {
+  time: string;              // ISO timestamp
+  moisture_percent: number;
+  raw_value: number;
+  device_id: string;
+}
+
+// Full response from GET /sensor-readings/{field_id}/history
+export interface SensorHistoryResponse {
+  field_id: number;
+  hours: number;
+  count: number;
+  readings: SensorReading[];
+}
+
 // Real field record returned by GET /fields and POST /fields
 export interface BackendField {
   id: number;

@@ -6,8 +6,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { getFields, getFieldConditions } from "@/lib/api";
+import { getFields, getFieldConditions, getSensorHistory } from "@/lib/api";
 import { BackendField, FieldConditions } from "@/lib/types";
+import { calculateDailyAverages } from "@/lib/fieldStatus";
 import { STRINGS } from "@/lib/strings";
 import FieldCard from "@/components/FieldCard";
 import LoadingCard from "@/components/LoadingCard";
@@ -17,6 +18,7 @@ interface FieldItem {
   field: BackendField;
   conditions?: FieldConditions | null;
   conditionsError?: boolean;
+  trendData?: number[];
 }
 
 export default function FieldsPage() {
@@ -31,24 +33,37 @@ export default function FieldsPage() {
       // 1. Fetch real fields from backend
       const fields = await getFields();
 
-      // 2. Fetch conditions for each field in parallel; one failure does not break the others
-      const conditionsResults = await Promise.allSettled(
-        fields.map((f) => getFieldConditions(f.id))
-      );
+      // 2. Fetch conditions and 7-day sensor history for each field in parallel
+      const [conditionsResults, historyResults] = await Promise.all([
+        Promise.allSettled(fields.map((f) => getFieldConditions(f.id))),
+        Promise.allSettled(fields.map((f) => getSensorHistory(f.id, 168))),
+      ]);
 
       const fieldItems: FieldItem[] = fields.map((field, idx) => {
-        const result = conditionsResults[idx];
-        if (result.status === "fulfilled") {
+        const cRes = conditionsResults[idx];
+        const hRes = historyResults[idx];
+
+        let trendData: number[] | undefined = undefined;
+        if (hRes.status === "fulfilled") {
+          const daily = calculateDailyAverages(hRes.value.readings);
+          if (daily.length >= 2) {
+            trendData = daily.map((d) => d.moisture);
+          }
+        }
+
+        if (cRes.status === "fulfilled") {
           return {
             field,
-            conditions: result.value,
+            conditions: cRes.value,
             conditionsError: false,
+            trendData,
           };
         } else {
           return {
             field,
             conditions: null,
             conditionsError: true,
+            trendData,
           };
         }
       });
@@ -142,12 +157,13 @@ export default function FieldsPage() {
         // Normal State: Grid of registered field cards + register another card
         <section aria-label="Registered fields list" className="flex flex-col gap-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 lg:gap-6">
-            {items.map(({ field, conditions, conditionsError }) => (
+            {items.map(({ field, conditions, conditionsError, trendData }) => (
               <FieldCard
                 key={field.id}
                 field={field}
                 conditions={conditions}
                 conditionsError={conditionsError}
+                trendData={trendData}
               />
             ))}
 

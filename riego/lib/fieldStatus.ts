@@ -1,8 +1,8 @@
 // lib/fieldStatus.ts
 // Shared helper mapping backend soil_moisture telemetry to user-friendly UI display states
-// Used by the Fields page (/fields) and reused by the Dashboard (/) in later steps
+// Used by the Fields page (/fields) and the Dashboard (/) — keep it in one place so both are consistent
 
-import { FieldConditions } from "./types";
+import { FieldConditions, MoistureDataPoint, SensorReading } from "./types";
 
 export type DisplayMoistureLevel = "good" | "okay" | "dry" | "no_reading" | "error";
 
@@ -17,6 +17,63 @@ export interface FieldMoistureDisplay {
   isStale: boolean;
   staleLabel: string; // "Old reading"
   moisturePercent: number | null; // null if no reading or error
+}
+
+/**
+ * Groups raw sensor readings by calendar day and computes one average moisture value per day.
+ * Returns array of { date, moisture } in chronological order.
+ */
+export function calculateDailyAverages(readings: SensorReading[]): MoistureDataPoint[] {
+  if (!readings || readings.length === 0) return [];
+
+  const buckets = new Map<string, number[]>();
+  for (const r of readings) {
+    if (r.moisture_percent === null || r.moisture_percent === undefined || isNaN(r.moisture_percent)) {
+      continue;
+    }
+    const dayLabel = new Date(r.time).toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+    const existing = buckets.get(dayLabel);
+    if (existing) {
+      existing.push(r.moisture_percent);
+    } else {
+      buckets.set(dayLabel, [r.moisture_percent]);
+    }
+  }
+
+  const result: MoistureDataPoint[] = [];
+  for (const [date, values] of buckets) {
+    if (values.length === 0) continue;
+    result.push({
+      date,
+      moisture: Math.round(values.reduce((s, v) => s + v, 0) / values.length),
+    });
+  }
+  return result;
+}
+
+/**
+ * Returns a plain human-readable age string from an ISO timestamp.
+ * Examples: "5 minutes ago", "3 hours ago", "2 days ago", "No data".
+ * Put here so the Fields page and the Dashboard both use the same wording.
+ */
+export function timeAgo(isoTimestamp?: string | null): string {
+  if (!isoTimestamp) return "No data";
+  try {
+    const diffMs = Date.now() - new Date(isoTimestamp).getTime();
+    if (isNaN(diffMs) || diffMs < 0) return "No data";
+
+    const minutes = Math.floor(diffMs / 60_000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+  } catch {
+    return "No data";
+  }
 }
 
 /**

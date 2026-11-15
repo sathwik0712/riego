@@ -1,7 +1,7 @@
 "use client";
 
 // Moisture trend chart for desktop Home page
-// Displays 7-day soil moisture history for all fields with target band
+// Displays 7-day soil moisture history from real sensor data
 // Color is not the only signal: uses distinct line styles (solid, dashed, dotted)
 // Chart area fills remaining height with legend pinned at the bottom
 
@@ -16,12 +16,22 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Field, BackendField, MoistureHistory, MoistureTarget } from "../lib/types";
+import { BackendField, MoistureDataPoint } from "../lib/types";
+import { ClockIcon } from "./icons";
+
+// One field's 7-day daily averages for the chart
+interface FieldTrend {
+  fieldId: number;
+  name: string;
+  crop: string;
+  // One entry per day, oldest first
+  dailyAverages: MoistureDataPoint[];
+}
 
 interface MoistureChartProps {
-  history: MoistureHistory[];
-  target: MoistureTarget;
-  fields: (Field | BackendField)[];
+  // Already-computed daily averages per field
+  fieldTrends: FieldTrend[];
+  target: { min: number; max: number };
 }
 
 // Preset visual styles for field lines
@@ -32,9 +42,8 @@ const FIELD_STYLES = [
 ];
 
 export default function MoistureChart({
-  history,
+  fieldTrends,
   target,
-  fields,
 }: MoistureChartProps) {
   // Client mount flag to prevent SSR hydration discrepancies with Recharts
   const [isMounted, setIsMounted] = useState(false);
@@ -42,29 +51,41 @@ export default function MoistureChart({
     setIsMounted(true);
   }, []);
 
-  // Map field id to field data for crop name and label
-  const fieldMap = new Map(fields.map((f) => [String(f.id), f]));
+  // Fields with at least 2 data points (minimum for a line)
+  const validTrends = fieldTrends.filter((t) => t.dailyAverages.length >= 2);
+
+  // If no field has enough data, show a placeholder message
+  if (validTrends.length === 0) {
+    return (
+      <div className="bg-white rounded-3xl p-6 border border-[#DCD6C0] shadow-sm flex flex-col justify-center items-center h-full min-h-[200px] gap-3">
+        <ClockIcon className="w-8 h-8 text-[#5F6E62]" />
+        <p className="text-sm text-[#5F6E62] text-center">Not enough data yet for a moisture trend chart</p>
+      </div>
+    );
+  }
 
   // Build field configs with style metadata
-  const configs = history.map((h, index) => {
+  const configs = validTrends.map((t, index) => {
     const style = FIELD_STYLES[index % FIELD_STYLES.length];
-    const field = fieldMap.get(String(h.fieldId));
-    const fieldName = (field && "nickname" in field && field.nickname) ? field.nickname : (field && "name" in field ? field.name : `Field ${index + 1}`);
     return {
-      fieldId: h.fieldId,
-      name: fieldName,
-      crop: field?.crop || "Crop",
+      fieldId: String(t.fieldId),
+      name: t.name,
+      crop: t.crop,
       color: style.color,
       strokeDasharray: style.strokeDasharray,
       styleLabel: style.styleLabel,
     };
   });
 
-  // Transform data points into Recharts row structure: [{ date: "Nov 9", "fld-1": 80, ... }]
-  const chartData = (history[0]?.data || []).map((point, index) => {
+  // Transform data points into Recharts row structure: [{ date: "Nov 9", "1": 80, "2": 45 }]
+  // All fields share the same date labels; use the longest trend for dates
+  const longestTrend = validTrends.reduce((a, b) =>
+    a.dailyAverages.length >= b.dailyAverages.length ? a : b
+  );
+  const chartData = longestTrend.dailyAverages.map((point, index) => {
     const row: Record<string, string | number> = { date: point.date };
-    history.forEach((h) => {
-      row[h.fieldId] = h.data[index]?.moisture ?? 0;
+    validTrends.forEach((t) => {
+      row[String(t.fieldId)] = t.dailyAverages[index]?.moisture ?? 0;
     });
     return row;
   });
@@ -79,7 +100,7 @@ export default function MoistureChart({
         <p className="text-sm text-[#5F6E62] mt-0.5">Last 7 days</p>
       </div>
 
-      {/* Chart container grows to fill remaining height (flex-1, min-h-[300px]) */}
+      {/* Chart container grows to fill remaining height */}
       <div className="w-full flex-1 min-h-[300px] mt-4 mb-2">
         {isMounted ? (
           <ResponsiveContainer width="100%" height="100%">

@@ -4,7 +4,7 @@
 
 import { STRINGS } from "../lib/strings";
 import { Field, BackendField, FieldConditions } from "../lib/types";
-import { getFieldMoistureDisplay } from "../lib/fieldStatus";
+import { getFieldMoistureDisplay, timeAgo } from "../lib/fieldStatus";
 import { ClockIcon } from "./icons";
 import Sparkline from "./Sparkline";
 
@@ -12,6 +12,9 @@ interface FieldCardProps {
   field: Field | BackendField;
   conditions?: FieldConditions | null;
   conditionsError?: boolean;
+  // 7-day daily averages for the sparkline trend (one number per day, oldest first)
+  // Undefined or fewer than 2 points → shows "Not enough data yet"
+  trendData?: number[];
 }
 
 // Format sowing date as "14 Oct 2026"
@@ -30,7 +33,7 @@ function formatSownDate(dateStr?: string | null): string {
   }
 }
 
-export default function FieldCard({ field, conditions, conditionsError }: FieldCardProps) {
+export default function FieldCard({ field, conditions, conditionsError, trendData }: FieldCardProps) {
   // Determine if this is a real BackendField or legacy mock Field
   const isBackend = "latitude" in field || "registered_at" in field;
   
@@ -56,6 +59,10 @@ export default function FieldCard({ field, conditions, conditionsError }: FieldC
     ? (field as BackendField).has_sensor
     : Boolean((field as Field).sensorStatus);
 
+  // Device ID: show "—" when null/undefined/the literal string "null" instead of the text "null"
+  const rawDeviceId = isBackend ? (field as BackendField).device_id : null;
+  const deviceIdText = rawDeviceId && rawDeviceId !== "null" ? rawDeviceId : "—";
+
   // Status computation via shared fieldStatus helper
   const status = isBackend || conditions !== undefined || conditionsError
     ? getFieldMoistureDisplay(conditions, conditionsError)
@@ -74,6 +81,20 @@ export default function FieldCard({ field, conditions, conditionsError }: FieldC
 
   const hasPercent = status.moisturePercent !== null;
   const clampedPercentage = hasPercent ? Math.min(Math.max(status.moisturePercent!, 0), 100) : 0;
+
+  // Trend: use real trendData if passed and has at least 2 points; otherwise no chart
+  const hasTrend = trendData && trendData.length >= 2;
+  const sparklineColor =
+    status.level === "dry"
+      ? "#DC2626"
+      : status.level === "okay"
+        ? "#D97706"
+        : status.level === "good"
+          ? "#2E7D32"
+          : "#5F6E62";
+
+  // "Last reading" real age string from conditions timestamp
+  const lastReadingText = timeAgo(conditions?.soil_moisture?.measured_at);
 
   return (
     <article className="w-full h-full flex flex-col justify-between bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-[#DCD6C0] hover:shadow-md transition-shadow">
@@ -149,31 +170,24 @@ export default function FieldCard({ field, conditions, conditionsError }: FieldC
 
       {/* ── Desktop-only details ── */}
       <div className="hidden lg:flex lg:flex-col gap-3 mt-4">
-        {/* 7-day trend sparkline */}
+        {/* 7-day trend sparkline — real sensor history averaged per day */}
         <div className="pt-3 border-t border-[#F2EFE4] flex items-center justify-between">
           <span className="text-sm text-[#5F6E62]">7-day trend</span>
-          <Sparkline
-            data={
-              "history" in field && field.history && field.history.length > 0
-                ? field.history.map((h: any) => h.moisture ?? h)
-                : hasPercent
-                  ? [50, 52, 55, 58, 60, 62, clampedPercentage]
-                  : [50, 50, 50, 50, 50, 50, 50]
-            }
-            width={96}
-            height={28}
-            color={
-              status.level === "dry"
-                ? "#DC2626"
-                : status.level === "okay"
-                  ? "#D97706"
-                  : status.level === "good"
-                    ? "#2E7D32"
-                    : "#5F6E62"
-            }
-            min={0}
-            max={100}
-          />
+          {hasTrend ? (
+            <Sparkline
+              data={trendData!}
+              width={96}
+              height={28}
+              color={sparklineColor}
+              min={0}
+              max={100}
+            />
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-[#5F6E62]">
+              <ClockIcon className="w-3.5 h-3.5" />
+              Not enough data yet
+            </span>
+          )}
         </div>
 
         {/* 2-column x 3-row detail grid */}
@@ -196,13 +210,11 @@ export default function FieldCard({ field, conditions, conditionsError }: FieldC
             </div>
           </div>
 
-          {/* Last reading */}
+          {/* Last reading — real age from measured_at timestamp */}
           <div>
             <p className="text-sm text-[#5F6E62]">Last reading</p>
             <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {conditions?.soil_moisture?.measured_at
-                ? "Recent"
-                : "No data"}
+              {lastReadingText}
             </p>
           </div>
 
@@ -230,13 +242,11 @@ export default function FieldCard({ field, conditions, conditionsError }: FieldC
             </p>
           </div>
 
-          {/* Device ID / Telemetry */}
+          {/* Device ID — shows "—" when null, never shows the text "null" */}
           <div>
             <p className="text-sm text-[#5F6E62]">Device</p>
             <p className="text-base font-semibold text-[#1B2D21] whitespace-nowrap">
-              {isBackend && (field as BackendField).device_id
-                ? (field as BackendField).device_id
-                : "—"}
+              {deviceIdText}
             </p>
           </div>
         </div>

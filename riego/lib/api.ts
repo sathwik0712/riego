@@ -2,30 +2,21 @@
 // Communicates with the FastAPI backend and provides friendly farmer-facing error handling
 
 import {
-  addSampleField,
-  MOISTURE_TARGET,
   sampleAdvice,
   sampleAlerts,
   sampleFarmer,
   sampleFields,
-  sampleMoistureHistory,
   sampleSchedule,
-  sampleWeather,
 } from "./sampleData";
 import {
   Advice,
   Alert,
   BackendField,
   FarmerProfile,
-  Field,
   FieldConditions,
   FieldCreateData,
-  FieldFormData,
-  MoistureHistory,
-  MoistureTarget,
   ScheduleItem,
-  SummaryStats,
-  Weather,
+  SensorHistoryResponse,
 } from "./types";
 
 // Base API address from environment variable (falls back to local FastAPI backend)
@@ -134,11 +125,8 @@ export async function getFarmerProfile(): Promise<FarmerProfile> {
 }
 
 export async function getAdvice(): Promise<Advice> {
+  // Sample advice — connects to ML engine in a later step
   return sampleAdvice;
-}
-
-export async function getWeather(): Promise<Weather> {
-  return sampleWeather;
 }
 
 // Fetch all registered fields from the backend
@@ -185,44 +173,17 @@ export async function getFieldConditions(fieldId: number): Promise<FieldConditio
   return apiGet<FieldConditions>(`/fields/${fieldId}/conditions`);
 }
 
-export async function getMoistureHistory(): Promise<{
-  history: MoistureHistory[];
-  target: MoistureTarget;
-}> {
-  return { history: sampleMoistureHistory, target: MOISTURE_TARGET };
+// Fetch sensor reading history for a field for the last N hours (default 168 = 7 days)
+export async function getSensorHistory(fieldId: number, hours = 168): Promise<SensorHistoryResponse> {
+  return apiGet<SensorHistoryResponse>(`/sensor-readings/${fieldId}/history?hours=${hours}`);
 }
 
 export async function getTodaySchedule(): Promise<ScheduleItem[]> {
+  // Sample schedule — connects to irrigation planner in a later step
   return sampleSchedule;
 }
 
 export async function getRecentAlerts(): Promise<Alert[]> {
+  // Sample alerts — connects to alert engine in a later step
   return sampleAlerts;
-}
-
-export async function getSummaryStats(): Promise<SummaryStats> {
-  // Uses sampleFields for prototype dashboard summary until dashboard connects to backend in next step
-  const fields = sampleFields;
-  const alerts = await getRecentAlerts();
-
-  const avg =
-    fields.reduce((sum, f) => sum + f.moisturePercentage, 0) / fields.length;
-
-  const lowestField = [...fields].sort(
-    (a, b) => a.moisturePercentage - b.moisturePercentage
-  )[0];
-
-  return {
-    averageMoisture: Math.round(avg),
-    rainChance: 15,
-    activeAlerts: alerts.length,
-    sensorsOnline: 2,
-    sensorsTotal: 3,
-    criticalAlerts: alerts.filter((a) => a.severity === "critical").length,
-    warningAlerts: alerts.filter((a) => a.severity === "warning").length,
-    infoAlerts: alerts.filter((a) => a.severity === "info").length,
-    lowestMoistureField: lowestField
-      ? { name: lowestField.name, moisture: lowestField.moisturePercentage }
-      : undefined,
-  };
 }

@@ -1,88 +1,126 @@
+"use client";
+
 // WeatherStrip component
-// Unified styling: rounded-3xl, p-5 sm:p-6, 4-tier type scale
-// Phone & tablet keep horizontal 3-column strip; desktop displays hero temperature + stacked rows
+// Shows live weather from the first field's conditions response.
+// Falls back to "Weather not available right now" with an icon if unavailable.
+// Rounded-3xl, p-5 sm:p-6, 4-tier type scale, line icons only (no emoji).
 
-import { STRINGS } from "../lib/strings";
-import { Weather } from "../lib/types";
-import { CloudRainIcon, DropIcon, SunIcon } from "./icons";
+import { CloudRainIcon, DropIcon, SunIcon, AlertIcon } from "./icons";
 
-interface WeatherStripProps {
-  weather: Weather;
+// Weather data shape from FieldConditions.weather.current
+interface LiveWeather {
+  temperature_c: number;
+  humidity_percent: number;
+  rain_mm_last_hour?: number;
+  is_raining?: boolean;
 }
 
-export default function WeatherStrip({ weather }: WeatherStripProps) {
-  const rainText = weather.rainExpected ? STRINGS.weather.rainYes : STRINGS.weather.rainNo;
+interface WeatherStripProps {
+  // available = false means weather could not be fetched
+  available: boolean;
+  current?: LiveWeather | null;
+  rainExpectedSoon?: boolean | null;
+  rainTotalMmNext2Days?: number | null;
+}
+
+export default function WeatherStrip({
+  available,
+  current,
+  rainExpectedSoon,
+  rainTotalMmNext2Days,
+}: WeatherStripProps) {
+  // Show unavailable state if the backend said weather is not available or current is missing
+  if (!available || !current) {
+    return (
+      <section
+        aria-label="Current Weather"
+        className="w-full h-full flex flex-col justify-center bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-[#DCD6C0]"
+      >
+        <div className="flex items-center gap-3 text-[#5F6E62]">
+          <div className="w-10 h-10 rounded-xl bg-[#EFEAD8] flex items-center justify-center shrink-0">
+            <AlertIcon className="w-5 h-5 text-[#5F6E62]" />
+          </div>
+          <p className="text-sm font-medium">Weather not available right now</p>
+        </div>
+      </section>
+    );
+  }
+
+  // Rain label: "Yes" if currently raining or expected soon, with mm if above 0
+  const isRaining = current.is_raining || rainExpectedSoon;
+  const rainLabel = isRaining ? "Yes" : "No";
+  const rainMmText =
+    rainTotalMmNext2Days && rainTotalMmNext2Days > 0
+      ? ` · ${rainTotalMmNext2Days.toFixed(1)} mm`
+      : "";
 
   return (
     <section
       aria-label="Current Weather"
       className="w-full h-full flex flex-col justify-center bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-[#DCD6C0]"
     >
-      {/* ── Phone & Tablet: original 3-column horizontal strip ── */}
+      {/* ── Phone & Tablet: 3-column horizontal strip ── */}
       <div className="lg:hidden grid grid-cols-3 divide-x divide-[#E3DEC3] text-center my-auto py-1">
         {/* Temperature */}
         <div className="flex flex-col items-center justify-center px-1 sm:px-2">
           <div className="flex items-center gap-1 sm:gap-1.5">
-            <span className="text-xl sm:text-2xl shrink-0" aria-hidden="true">🌤️</span>
+            <div className="w-6 h-6 flex items-center justify-center text-[#CA8A04]">
+              <SunIcon className="w-5 h-5" />
+            </div>
             <span className="text-xl sm:text-2xl font-bold text-[#1B2D21] whitespace-nowrap">
-              {weather.temperature}{STRINGS.weather.temperatureUnit}
+              {Math.round(current.temperature_c)}°C
             </span>
           </div>
-          <span className="text-sm text-[#5F6E62] mt-1 whitespace-nowrap">
-            {STRINGS.weather.temperatureLabel}
-          </span>
+          <span className="text-sm text-[#5F6E62] mt-1 whitespace-nowrap">Temperature</span>
         </div>
 
-        {/* Rain Forecast */}
+        {/* Rain */}
         <div className="flex flex-col items-center justify-center px-1 sm:px-2">
           <div className="flex items-center gap-1 sm:gap-1.5">
-            <span className="text-xl sm:text-2xl shrink-0" aria-hidden="true">🌧️</span>
+            <div className="w-6 h-6 flex items-center justify-center text-[#0369A1]">
+              <CloudRainIcon className="w-5 h-5" />
+            </div>
             <span className="text-xl sm:text-2xl font-bold text-[#1B2D21] whitespace-nowrap">
-              {STRINGS.weather.rainLabel}: {rainText}
+              {rainLabel}
             </span>
           </div>
           <span className="text-sm text-[#5F6E62] mt-1 whitespace-nowrap">
-            {STRINGS.weather.forecastLabel}
+            Rain{rainMmText}
           </span>
         </div>
 
         {/* Humidity */}
         <div className="flex flex-col items-center justify-center px-1 sm:px-2">
           <div className="flex items-center gap-1 sm:gap-1.5">
-            <span className="text-xl sm:text-2xl shrink-0" aria-hidden="true">💧</span>
+            <div className="w-6 h-6 flex items-center justify-center text-[#0E7490]">
+              <DropIcon className="w-5 h-5" />
+            </div>
             <span className="text-xl sm:text-2xl font-bold text-[#1B2D21] whitespace-nowrap">
-              {weather.humidity}%
+              {current.humidity_percent}%
             </span>
           </div>
-          <span className="text-sm text-[#5F6E62] mt-1 whitespace-nowrap">
-            {STRINGS.weather.humidityLabel}
-          </span>
+          <span className="text-sm text-[#5F6E62] mt-1 whitespace-nowrap">Humidity</span>
         </div>
       </div>
 
       {/* ── Desktop only: hero temperature + stacked metric rows ── */}
       <div className="hidden lg:flex flex-col h-full justify-center gap-3">
-        {/* Top label in sentence case */}
-        <p className="text-sm text-[#5F6E62]">
-          Near your fields
-        </p>
+        <p className="text-sm text-[#5F6E62]">Near your fields</p>
 
-        {/* Hero: sun icon box + text-4xl temperature */}
+        {/* Hero: sun icon box + temperature */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#FEF9C3] flex items-center justify-center text-[#CA8A04] shrink-0">
             <SunIcon className="w-5 h-5" />
           </div>
           <div>
             <p className="text-3xl lg:text-4xl font-bold text-[#1B2D21] leading-none">
-              {weather.temperature}{STRINGS.weather.temperatureUnit}
+              {Math.round(current.temperature_c)}°C
             </p>
-            <p className="text-sm text-[#5F6E62] mt-0.5">
-              {STRINGS.weather.temperatureLabel}
-            </p>
+            <p className="text-sm text-[#5F6E62] mt-0.5">Temperature</p>
           </div>
         </div>
 
-        {/* Two stacked metric rows separated by thin divider */}
+        {/* Two stacked metric rows */}
         <div className="flex flex-col gap-2 pt-3 border-t border-[#F2EFE4]">
           {/* Rain row */}
           <div className="flex items-center gap-3">
@@ -90,11 +128,9 @@ export default function WeatherStrip({ weather }: WeatherStripProps) {
               <CloudRainIcon className="w-5 h-5" />
             </div>
             <div className="flex-1 flex justify-between items-baseline min-w-0">
-              <span className="text-sm text-[#5F6E62]">
-                {STRINGS.weather.forecastLabel}
-              </span>
+              <span className="text-sm text-[#5F6E62]">Rain forecast</span>
               <span className="text-base font-semibold text-[#1B2D21]">
-                {STRINGS.weather.rainLabel}: {rainText}
+                {rainLabel}{rainMmText}
               </span>
             </div>
           </div>
@@ -105,11 +141,9 @@ export default function WeatherStrip({ weather }: WeatherStripProps) {
               <DropIcon className="w-5 h-5" />
             </div>
             <div className="flex-1 flex justify-between items-baseline min-w-0">
-              <span className="text-sm text-[#5F6E62]">
-                {STRINGS.weather.humidityLabel}
-              </span>
+              <span className="text-sm text-[#5F6E62]">Humidity</span>
               <span className="text-base font-semibold text-[#1B2D21]">
-                {weather.humidity}%
+                {current.humidity_percent}%
               </span>
             </div>
           </div>
