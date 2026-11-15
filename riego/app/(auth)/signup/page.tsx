@@ -11,6 +11,7 @@ import { CheckIcon, AlertIcon } from "@/components/icons";
 import OtpInput from "@/components/OtpInput";
 import { languageOptions } from "@/lib/sampleData";
 import { SignupFormData } from "@/lib/types";
+import { saveFarmer, startSession } from "@/lib/session";
 
 // Fake constant for demo mode
 const FAKE_OTP = "123456";
@@ -97,6 +98,13 @@ export default function SignupPage() {
     // Future backend integration:
     // Call POST /auth/verify-otp with { phone, otp }
     if (otp === FAKE_OTP) {
+      const farmer = saveFarmer(
+        formData.name,
+        formData.phone,
+        formData.village,
+        formData.preferredLanguage
+      );
+      startSession(farmer);
       setOtpError("");
       setIsSuccess(true);
     } else {

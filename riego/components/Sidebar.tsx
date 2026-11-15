@@ -4,8 +4,10 @@
 // Replaces bottom navigation on larger screens with accessible icons + labels
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Logo from "./Logo";
+import { LogoutIcon } from "./icons";
+import { endSession } from "@/lib/session";
 import { STRINGS } from "../lib/strings";
 
 interface SidebarProps {
@@ -18,6 +20,7 @@ export default function Sidebar({
   farmerName = "Ramesh Kumar",
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
 
   const navItems = [
     {
@@ -101,7 +104,7 @@ export default function Sidebar({
     >
       {/* Brand & Logo Header */}
       <div className="h-20 px-6 flex items-center gap-3 border-b border-[#E3DEC3]">
-        <Logo size="md" tone="light" showName={true} />
+        <Logo size="md" tone="dark" showName={true} />
       </div>
 
       {/* Navigation Items List */}
@@ -126,7 +129,7 @@ export default function Sidebar({
       </nav>
 
       {/* Farmer Profile Footer */}
-      <div className="p-4 border-t border-[#E3DEC3] bg-[#F5F1E1]/60">
+      <div className="p-4 border-t border-[#E3DEC3] bg-[#F5F1E1]/60 flex flex-col gap-2">
         <div className="flex items-center gap-3 p-2 rounded-2xl">
           <div className="w-12 h-12 rounded-full bg-[#235334] text-[#FAF7EE] font-bold text-lg flex items-center justify-center shadow-sm shrink-0">
             {farmerInitial}
@@ -138,6 +141,19 @@ export default function Sidebar({
             <p className="text-xs text-[#5F6E62]">Farmer</p>
           </div>
         </div>
+
+        {/* Log out button (at least 56px tall, sentence case) */}
+        <button
+          type="button"
+          onClick={() => {
+            endSession();
+            router.push("/welcome");
+          }}
+          className="min-h-[56px] w-full px-4 rounded-2xl border border-[#D1CAAD] bg-[#FAF7EE] hover:bg-[#EFEAD8] active:scale-95 text-[#1B2D21] font-semibold text-sm flex items-center gap-3 transition-all cursor-pointer shadow-xs"
+        >
+          <LogoutIcon className="w-5 h-5 text-[#5F6E62]" />
+          <span>Log out</span>
+        </button>
       </div>
     </aside>
   );
