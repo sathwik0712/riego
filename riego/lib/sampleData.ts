@@ -8,11 +8,19 @@ import {
   Field,
   FieldFormData,
   FormOption,
+  LanguageOption,
   MoistureHistory,
   MoistureTarget,
   ScheduleItem,
   Weather,
 } from "./types";
+
+// Supported languages for signup & user preferences
+export const languageOptions: LanguageOption[] = [
+  { code: "en", label: "English" },
+  { code: "hi", label: "हिन्दी" },
+  { code: "kn", label: "ಕನ್ನಡ" },
+];
 
 export const sampleFarmer: FarmerProfile = {
   name: "Ramesh Kumar",

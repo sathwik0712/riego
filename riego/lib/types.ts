@@ -143,4 +143,19 @@ export interface FieldFormData {
   deviceId: string; // Required if hasSensor is true
 }
 
+// Language choice option for farmer authentication and preferences
+export interface LanguageOption {
+  code: string; // "en" | "hi" | "kn"
+  label: string; // "English" | "हिन्दी" | "ಕನ್ನಡ"
+}
+
+// Signup form state for Task 2 Step 5
+export interface SignupFormData {
+  name: string;
+  phone: string;
+  village: string;
+  preferredLanguage: string; // "en" | "hi" | "kn"
+}
+
+
 

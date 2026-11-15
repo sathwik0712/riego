@@ -5,6 +5,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Logo from "./Logo";
 import { STRINGS } from "../lib/strings";
 
 interface SidebarProps {
@@ -100,17 +101,7 @@ export default function Sidebar({
     >
       {/* Brand & Logo Header */}
       <div className="h-20 px-6 flex items-center gap-3 border-b border-[#E3DEC3]">
-        <div className="w-11 h-11 rounded-2xl bg-[#235334] text-[#FAF7EE] flex items-center justify-center font-black text-xl shadow-sm shrink-0">
-          💧
-        </div>
-        <div>
-          <h1 className="text-2xl font-black tracking-wide text-[#1B2D21]">
-            {STRINGS.appName}
-          </h1>
-          <p className="text-xs font-semibold text-[#5F6E62]">
-            Smart Irrigation
-          </p>
-        </div>
+        <Logo size="md" tone="light" showName={true} />
       </div>
 
       {/* Navigation Items List */}

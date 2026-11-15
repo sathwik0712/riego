@@ -5,6 +5,7 @@
 // Desktop: greeting & date on left, help & language on right (full language names)
 
 import { useState } from "react";
+import Logo from "./Logo";
 import { STRINGS } from "../lib/strings";
 
 // Format date e.g. "Sunday, 15 November 2026"
@@ -63,13 +64,8 @@ export default function TopBar({
         </div>
 
         {/* Mobile/Tablet Center: Riego Logo + Brand Title (<1024px) */}
-        <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-1 min-w-0 lg:hidden">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#235334] text-[#FAF7EE] flex items-center justify-center text-sm sm:text-base shadow-sm shrink-0">
-            💧
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#1B2D21] truncate">
-            {STRINGS.appName}
-          </h1>
+        <div className="flex items-center justify-center flex-1 min-w-0 lg:hidden">
+          <Logo size="sm" tone="dark" showName={true} />
         </div>
 
         {/* Right: Help button and Language Switcher */}

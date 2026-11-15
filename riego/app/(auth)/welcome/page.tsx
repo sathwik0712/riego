@@ -6,6 +6,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import Logo from "@/components/Logo";
 import { DropIcon, CloudRainIcon, SpeakerIcon } from "@/components/icons";
 
 // Supported languages for the visual glass switcher
@@ -58,17 +59,9 @@ export default function WelcomePage() {
 
       {/* 3. Content layer positioned above background and overlay */}
       <div className="relative z-10 w-full max-w-[1100px] mx-auto min-h-full flex-1 flex flex-col justify-between gap-6 sm:gap-8">
-        {/* Top row: White logo box + Riego brand name & glass language switcher */}
+        {/* Top row: Logo & glass language switcher */}
         <header className="w-full flex items-center justify-between gap-4 py-2 shrink-0">
-          <div className="flex items-center gap-3">
-            {/* 48px white icon box with dark green drop icon */}
-            <div className="w-12 h-12 rounded-2xl bg-white text-[#1B2D21] flex items-center justify-center shadow-lg shrink-0">
-              <DropIcon className="w-6 h-6 text-[#1B2D21]" />
-            </div>
-            <span className="text-2xl sm:text-3xl font-extrabold tracking-wide text-white drop-shadow-sm">
-              Riego
-            </span>
-          </div>
+          <Logo size="md" tone="light" showName={true} />
 
           {/* Glass language switcher pill */}
           <div
