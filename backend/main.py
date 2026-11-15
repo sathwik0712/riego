@@ -6,6 +6,7 @@ import models
 from routers.fields import router as fields_router
 from routers.sensor_readings import router as sensor_readings_router
 from routers.auth import router as auth_router
+from routers.weather import router as weather_router
 
 # Lifespan event handler to create tables, seed data, and set up hypertable
 @asynccontextmanager
@@ -49,6 +50,7 @@ app = FastAPI(title="Riego API", lifespan=lifespan)
 app.include_router(fields_router)
 app.include_router(sensor_readings_router)
 app.include_router(auth_router)
+app.include_router(weather_router)
 
 # Health check route
 @app.get("/health")

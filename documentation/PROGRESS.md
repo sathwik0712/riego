@@ -252,3 +252,51 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 4. Combine sensor and weather data
 5. Add recommendations and irrigation log tables, then connect frontend to backend, plus manual reading entry screen
 6. ML data set structure and fake data generator (lowest priority)
+
+---
+
+## Session 7: Week 2 (15 November 2026) — Task 2: Farmer Accounts, Signup, Login and Landing Page (Fake OTP)
+
+### Backend
+- Added `farmers` table and `Farmer` model. `fields.farmer_id` links to it (FK exists in the model only; existing tables were not recreated).
+- `farmer_001` (Ramesh Kumar) is seeded on startup.
+- Added endpoints: `POST /auth/signup`, `POST /auth/request-otp`, `POST /auth/verify-otp`, and `GET /auth/me`. Tested, all passing.
+- OTP is fake (`123456`) and tokens are kept in memory. Both are placeholders for Twilio and JWT.
+
+### Frontend
+- Created route groups `(app)` and `(auth)`. The sidebar, top bar, and bottom nav appear only on app pages.
+- Built `/welcome` landing page with full-screen photo, language switcher, and benefit rows.
+- Built `/signup` (details, OTP, success) and `/login` (phone, OTP) using the shared `OtpInput` component.
+- Created `Logo` component with the Riego logo, used on all pages.
+- Added fake session in the browser. Logged-out visitors go to `/welcome`. Farmer name and initial are shown, with a Log out button on desktop and mobile.
+
+### Not Connected Yet
+- Signup and login screens do not call the backend. They use browser storage and the demo code `123456`.
+- Language switchers are visual only.
+
+### What's Next
+- Task 3: Weather API integration.
+
+---
+
+## Session 8: Week 2 (15 November 2026) — Task 3: Weather API Integration
+
+### Backend
+- `backend/services/weather.py`: `get_current_weather` and `get_forecast` using OpenWeatherMap (free endpoints, metric units, 10 second timeout). Key is read from `backend/.env` (`OPENWEATHER_API_KEY`); `.env` is in `.gitignore`.
+- Forecast is grouped into daily summaries (min/max temperature, average humidity, total rain, rain chance, `rain_expected`).
+- `WeatherUnavailable` exception: the app never crashes when the weather API fails (FR-1.4, NFR-5).
+- `backend/routers/weather.py`: `GET /weather/{field_id}` uses the field's latitude and longitude. Returns 404 for an unknown field and 503 with a plain message when weather is down.
+- In-memory cache of 10 minutes per location to protect the free API limit.
+
+### Verification
+- Tested live: returned real current weather and a 5-day forecast for field 1 and the values matched the phone weather app.
+
+### Not Done Yet
+- Weather is not saved to the database (Task 4, weather history).
+- Weather is not shown in the frontend yet (Task 6).
+- Cache is in memory and is lost on restart.
+
+### What's Next
+- Task 4, historical data storage.
+
+
