@@ -1,57 +1,79 @@
 "use client";
 
-// Top bar: farmer profile on far left, Riego logo + title in center, help & language on right
-// Responsive: compact on mobile (<640px) fitting cleanly down to 360px without overlap,
-// full language names and "Help" label on desktop (>=1024px)
+// Top bar:
+// Mobile: profile circle on left, Riego logo & title in center, help & language on right
+// Desktop: greeting & date on left, help & language on right (full language names)
 
 import { useState } from "react";
 import { STRINGS } from "../lib/strings";
 
-interface TopBarProps {
-  farmerInitial?: string;
+// Format date e.g. "Sunday, 15 November 2026"
+function formatDate(d: Date): string {
+  return d.toLocaleDateString("en-IN", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
-export default function TopBar({ farmerInitial = "R" }: TopBarProps) {
-  // Visual language switcher state (default English)
+function getGreeting(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+interface TopBarProps {
+  farmerInitial?: string;
+  farmerName?: string;
+}
+
+export default function TopBar({
+  farmerInitial = "R",
+  farmerName = "Ramesh",
+}: TopBarProps) {
   const [activeLang, setActiveLang] = useState("en");
+
+  const now = new Date();
+  const greetingText = `${getGreeting(now.getHours())}, ${farmerName}`;
+  const dateText = formatDate(now);
 
   return (
     <header className="sticky top-0 z-30 w-full bg-[#FAF7EE]/95 backdrop-blur-sm border-b border-[#E3DEC3] px-3 sm:px-6 lg:px-8 py-2 sm:py-2.5">
-      <div className="flex items-center justify-between gap-1.5 sm:gap-3 w-full max-w-6xl mx-auto">
-        {/* Left: Farmer Profile Circle (hidden on desktop where it lives in the sidebar) */}
-        <div className="flex items-center shrink-0">
+      <div className="flex items-center justify-between gap-2 w-full max-w-6xl mx-auto">
+        {/* Mobile: Farmer Profile Circle (<1024px) */}
+        <div className="flex items-center lg:hidden shrink-0">
           <button
             type="button"
             aria-label={STRINGS.profileAria}
-            className="w-11 h-11 sm:w-12 sm:h-12 min-w-[44px] min-h-[44px] sm:min-w-[48px] sm:min-h-[48px] rounded-full bg-[#235334] text-[#FAF7EE] font-bold text-lg sm:text-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform lg:hidden shrink-0"
+            className="w-11 h-11 sm:w-12 sm:h-12 min-w-[44px] min-h-[44px] sm:min-w-[48px] sm:min-h-[48px] rounded-full bg-[#235334] text-[#FAF7EE] font-bold text-lg sm:text-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform shrink-0"
           >
             {farmerInitial}
           </button>
-
-          {/* Desktop welcome message */}
-          <div className="hidden lg:block">
-            <h2 className="text-xl font-extrabold text-[#1B2D21]">
-              Overview Dashboard
-            </h2>
-            <p className="text-xs text-[#5F6E62]">
-              Real-time irrigation guidance & soil telemetry
-            </p>
-          </div>
         </div>
 
-        {/* Center: Riego Logo + Brand Title (visible on mobile/tablet, hidden on desktop sidebar) */}
+        {/* Desktop: Greeting & Date on the left (>=1024px) */}
+        <div className="hidden lg:flex flex-col justify-center">
+          <h1 className="text-xl font-semibold text-[#1B2D21] leading-tight">
+            {greetingText}
+          </h1>
+          <p className="text-sm text-[#5F6E62]">
+            {dateText}
+          </p>
+        </div>
+
+        {/* Mobile/Tablet Center: Riego Logo + Brand Title (<1024px) */}
         <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-1 min-w-0 lg:hidden">
-          {/* Small square card with water drop (matching sidebar logo) */}
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#235334] text-[#FAF7EE] flex items-center justify-center text-sm sm:text-base shadow-sm shrink-0">
             💧
           </div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight sm:tracking-wide text-[#1B2D21] truncate">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#1B2D21] truncate">
             {STRINGS.appName}
           </h1>
         </div>
 
         {/* Right: Help button and Language Switcher */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           {/* Help Button (shows text label on desktop) */}
           <button
             type="button"
@@ -60,7 +82,7 @@ export default function TopBar({ farmerInitial = "R" }: TopBarProps) {
             title={STRINGS.helpButtonAria}
           >
             <span className="text-lg sm:text-xl">?</span>
-            <span className="hidden sm:inline text-sm font-bold">
+            <span className="hidden sm:inline text-sm font-semibold">
               {STRINGS.helpLabel}
             </span>
           </button>
@@ -78,15 +100,13 @@ export default function TopBar({ farmerInitial = "R" }: TopBarProps) {
                   key={lang.code}
                   type="button"
                   onClick={() => setActiveLang(lang.code)}
-                  className={`h-9 sm:h-12 min-h-[36px] sm:min-h-[48px] px-2 sm:px-2.5 lg:px-3.5 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+                  className={`h-9 sm:h-12 min-h-[36px] sm:min-h-[48px] px-2.5 sm:px-3 lg:px-3.5 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
                     isActive
                       ? "bg-[#235334] text-[#FAF7EE] shadow-sm"
                       : "text-[#1B2D21] hover:bg-[#E3DEC3]/60"
                   }`}
                 >
-                  {/* Compact code on phone & tablet */}
                   <span className="lg:hidden">{lang.label}</span>
-                  {/* Full language name on desktop */}
                   <span className="hidden lg:inline">{lang.fullLabel}</span>
                 </button>
               );

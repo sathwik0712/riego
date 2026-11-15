@@ -186,8 +186,69 @@ Refined the mobile top bar layout to include the Riego drop logo without overlap
 
 ---
 
+## Session 6: Week 2 — Desktop Home Dashboard Redesign (Task 1)
+
+### Problem Addressed
+Mentor feedback noted that the mobile interface was working well, but the desktop dashboard had excessive empty space and needed better use of screen real estate.
+
+### What Was Built & Changed
+
+1. **Sample Data and Types (`lib/sampleData.ts`, `lib/types.ts`, `lib/api.ts`)**:
+   - Added 7-day moisture history data points and `MOISTURE_TARGET` (40–70% range).
+   - Added today's irrigation schedule (3 items with field name, duration, time, done status).
+   - Expanded alerts data (4 items with severity, message, time label, recommended action, read state).
+   - Added advice "best time" and "water amount" telemetry, calculated summary stats, and enriched field details (sensor status, last reading, next watering, sown date, area).
+
+2. **Summary Tiles Row (Desktop only)**:
+   - 4-tile header row showing average moisture with a 7-day sparkline, rain chance, active alerts count, and sensors online.
+   - Each tile includes a single helper line and an explicit status word pill ("Low", "Rain-safe", "Check", "1 offline") alongside color cues.
+
+3. **Home Layout (Desktop)**:
+   - Greeting and date moved into the top navigation bar.
+   - Advice card updated with best time and water amount telemetry glass pills.
+   - Weather card and field cards upgraded with moisture progress bar, 7-day trend line, and a 2×3 details grid (Sensor, Stage, Last reading, Sown, Next watering, Area).
+   - Tighter vertical rhythm and card gaps so the primary content fits comfortably within a 1440×900 viewport.
+
+4. **Bottom Row (Desktop only)**:
+   - Interactive 7-day moisture trend chart (`MoistureChart.tsx`) with shaded target band and distinct line styles (solid, dashed, dotted) so color is never the only signal.
+   - Today's schedule preview (`SchedulePreview.tsx`) showing chronological irrigation events with link to `/plan`.
+   - Recent alerts preview (`RecentAlerts.tsx`) showing the latest 2 alerts with stacked metadata and link to `/alerts`.
+
+5. **Shared Style**:
+   - Standardized on a strict 4-tier type scale (`text-4xl`, `text-xl`, `text-base`, `text-sm`), sentence-case labels (all uppercase letter-spaced labels removed), uniform `rounded-3xl` cards with `p-6` padding, `border-[#DCD6C0]`, `shadow-sm`, and 48px icon boxes.
+   - Built reusable inline SVG line icons in `components/icons.tsx` (drop, cloud-rain, bell, signal, sun, thermometer, speaker, clock, tank, check, alert).
+
+6. **Alerts Page (`app/alerts/page.tsx`)**:
+   - Dedicated alerts screen with severity filter tabs and counts (All, Critical, Warning, Info).
+   - 2-column responsive alert card grid with severity badges, plain-language recommended action boxes, bold unread borders, and empty state.
+
+7. **Fixes**:
+   - Removed decorative background bleed notch from the Advice card top right corner.
+   - Fixed tablet 2-column field grid so odd last card spans both columns.
+   - Fixed field card details grid with `whitespace-nowrap` to prevent text truncation.
+
+8. **Phone and Tablet**:
+   - Phone and tablet layouts remain unchanged, inheriting only the unified typography scale and card styling.
+
+---
+
+### Verification
+- `npm run build` passed with 0 errors after each step; layouts checked at 390px, 768px, 1024px and 1440px.
+
+---
+
+### Known Gaps
+- Alerts page still uses a few emoji icons (field icon, severity badges).
+- Plan page and Fields page are still empty shells.
+- All data is static sample data, not connected to the backend.
+- Moisture chart has extra empty space above the lines (0–100% axis).
+
+---
+
 ### What's Next
-- Connect the frontend (`riego/lib/api.ts`) to the live `/fields` and `/sensor-readings` endpoints, replacing in-memory mock data.
-- Integrate OpenWeatherMap for weather data ingestion.
-- Calibrate `DRY_RAW` and `WET_RAW` with real sensor measurements.
-- Add a manual reading entry route for fields without a sensor.
+1. Farmer accounts, then signup, login and landing pages (fake OTP for now)
+2. Weather API integration
+3. Historical data storage (weather table, history endpoints)
+4. Combine sensor and weather data
+5. Add recommendations and irrigation log tables, then connect frontend to backend, plus manual reading entry screen
+6. ML data set structure and fake data generator (lowest priority)

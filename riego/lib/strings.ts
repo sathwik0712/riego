@@ -30,7 +30,7 @@ export const STRINGS = {
   },
 
   // Field cards
-  fieldsHeader: "My Fields",
+  fieldsHeader: "My fields",
   moistureLabel: "Moisture",
   statusGood: "Good",
   statusOkay: "Okay",

@@ -12,6 +12,66 @@ export interface Advice {
   id: string;
   actionText: string; // e.g. "Water Field 1 at 6 AM for 30 minutes"
   fieldId: string;
+  bestTime?: string;    // e.g. "6:00 - 6:30 AM"
+  waterAmount?: string; // e.g. "1,200 L"
+}
+
+
+// One day of moisture readings for a field
+export interface MoistureDataPoint {
+  date: string;        // e.g. "Nov 9"
+  moisture: number;    // 0–100 %
+}
+
+// 7-day history for a single field
+export interface MoistureHistory {
+  fieldId: string;
+  data: MoistureDataPoint[];
+}
+
+// Target moisture band shown as a reference range on charts
+export interface MoistureTarget {
+  min: number;
+  max: number;
+}
+
+// One upcoming irrigation event in today's schedule
+export interface ScheduleItem {
+  id: string;
+  time: string;            // e.g. "6:00 AM"
+  fieldName: string;
+  durationMinutes: number;
+  done: boolean;
+}
+
+// Alert severity levels
+export type AlertSeverity = "critical" | "warning" | "info";
+
+// A single recent alert / notification
+export interface Alert {
+  id: string;
+  severity: AlertSeverity;
+  title: string;
+  message?: string;          // one plain sentence description
+  fieldName: string;
+  timeLabel?: string;        // e.g. "Today, 10:45 AM"
+  timeAgo?: string;          // e.g. "2h ago"
+  recommendedAction: string; // one plain sentence
+  isRead?: boolean;          // true = read, false = unread
+}
+
+// Dashboard summary numbers shown as stat tiles
+export interface SummaryStats {
+  averageMoisture: number;  // % average across all fields
+  rainChance: number;       // % probability of rain today
+  activeAlerts: number;     // count of current alerts
+  sensorsOnline: number;
+  sensorsTotal: number;
+  // Optional breakdowns for rich desktop tiles
+  criticalAlerts?: number;
+  warningAlerts?: number;
+  infoAlerts?: number;
+  lowestMoistureField?: { name: string; moisture: number };
 }
 
 // Current weather snapshot
@@ -24,6 +84,9 @@ export interface Weather {
 // Soil moisture condition category
 export type MoistureStatus = "good" | "okay" | "dry";
 
+// Sensor operational status
+export type SensorStatus = "online" | "stale";
+
 // Registered farm field
 export interface Field {
   id: string;
@@ -31,6 +94,14 @@ export interface Field {
   crop: string; // e.g. "Wheat"
   moisturePercentage: number; // 0 to 100
   status: MoistureStatus;
+  // Desktop extra details (Step 3)
+  sensorStatus?: SensorStatus;
+  lastReadingMinutes?: number; // e.g. 5
+  nextWateringTime?: string;   // e.g. "6:00 AM"
+  sownDate?: string;           // e.g. "2026-10-14"
+  area?: string;               // e.g. "2.5 acres"
+  growthStage?: string;        // e.g. "Vegetative, day 32"
+  history?: MoistureDataPoint[];
 }
 
 // Option item with icon and descriptive hint

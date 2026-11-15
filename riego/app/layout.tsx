@@ -27,7 +27,7 @@ export default function RootLayout({
           <TopBar farmerInitial="R" />
 
           {/* Responsive main content container */}
-          <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 md:px-8 lg:px-8 py-4 sm:py-6 lg:py-8 pb-28 lg:pb-12">
+          <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 md:px-8 lg:px-8 py-3 sm:py-4 lg:py-5 pb-28 lg:pb-8">
             {children}
           </main>
         </div>
