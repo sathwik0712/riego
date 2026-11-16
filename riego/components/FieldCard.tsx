@@ -2,7 +2,6 @@
 // Displays field name/nickname, crop, soil moisture progress bar, and operational status
 // Responsive: compact view on phone/tablet, expanded details on desktop
 
-import Link from "next/link";
 import { STRINGS } from "../lib/strings";
 import { Field, BackendField, FieldConditions } from "../lib/types";
 import { getFieldMoistureDisplay, timeAgo } from "../lib/fieldStatus";
@@ -16,7 +15,7 @@ interface FieldCardProps {
   // 7-day daily averages for the sparkline trend (one number per day, oldest first)
   // Undefined or fewer than 2 points → shows "Not enough data yet"
   trendData?: number[];
-  showEnterReading?: boolean;
+  onEnterReading?: (field: Field | BackendField) => void;
 }
 
 // Format sowing date as "14 Oct 2026"
@@ -40,7 +39,7 @@ export default function FieldCard({
   conditions,
   conditionsError,
   trendData,
-  showEnterReading = false,
+  onEnterReading,
 }: FieldCardProps) {
   // Determine if this is a real BackendField or legacy mock Field
   const isBackend = "latitude" in field || "registered_at" in field;
@@ -271,15 +270,16 @@ export default function FieldCard({
       </div>
 
       {/* ── Fields page action: Enter reading button (>=56px tall) ── */}
-      {showEnterReading && (
+      {onEnterReading && (
         <div className="pt-4 mt-4 border-t border-[#F2EFE4]">
-          <Link
-            href={`/fields/${field.id}/reading`}
+          <button
+            type="button"
+            onClick={() => onEnterReading(field)}
             className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
           >
             <EditIcon className="w-5 h-5 text-[#235334]" />
             <span>Enter reading</span>
-          </Link>
+          </button>
         </div>
       )}
     </article>

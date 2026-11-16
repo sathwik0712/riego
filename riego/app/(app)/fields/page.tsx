@@ -13,6 +13,7 @@ import { STRINGS } from "@/lib/strings";
 import FieldCard from "@/components/FieldCard";
 import LoadingCard from "@/components/LoadingCard";
 import ErrorNotice from "@/components/ErrorNotice";
+import ManualReadingModal from "@/components/ManualReadingModal";
 
 interface FieldItem {
   field: BackendField;
@@ -25,6 +26,7 @@ export default function FieldsPage() {
   const [items, setItems] = useState<FieldItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedFieldForReading, setSelectedFieldForReading] = useState<BackendField | null>(null);
 
   const loadFieldsData = useCallback(async () => {
     setLoading(true);
@@ -79,6 +81,42 @@ export default function FieldsPage() {
   useEffect(() => {
     loadFieldsData();
   }, [loadFieldsData]);
+
+  // Refresh a single field's conditions and history after a manual reading is saved
+  const handleFieldReadingSaved = async (fieldId: number) => {
+    try {
+      const [cRes, hRes] = await Promise.allSettled([
+        getFieldConditions(fieldId),
+        getSensorHistory(fieldId, 168),
+      ]);
+
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.field.id !== fieldId) return item;
+
+          let trendData: number[] | undefined = undefined;
+          if (hRes.status === "fulfilled") {
+            const daily = calculateDailyAverages(hRes.value.readings);
+            if (daily.length >= 2) {
+              trendData = daily.map((d) => d.moisture);
+            }
+          }
+
+          if (cRes.status === "fulfilled") {
+            return {
+              ...item,
+              conditions: cRes.value,
+              conditionsError: false,
+              trendData,
+            };
+          }
+          return item;
+        })
+      );
+    } catch {
+      // Ignore background refresh errors
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6 lg:gap-8 max-w-full overflow-x-hidden">
@@ -164,7 +202,7 @@ export default function FieldsPage() {
                 conditions={conditions}
                 conditionsError={conditionsError}
                 trendData={trendData}
-                showEnterReading={true}
+                onEnterReading={(f) => setSelectedFieldForReading(f as BackendField)}
               />
             ))}
 
@@ -194,6 +232,15 @@ export default function FieldsPage() {
           Telemetry updates automatically as fresh soil sensor readings and weather forecasts are fetched.
         </p>
       </div>
+
+      {/* Manual soil moisture reading pop-up modal */}
+      {selectedFieldForReading && (
+        <ManualReadingModal
+          field={selectedFieldForReading}
+          onClose={() => setSelectedFieldForReading(null)}
+          onSaved={() => handleFieldReadingSaved(selectedFieldForReading.id)}
+        />
+      )}
     </div>
   );
 }
