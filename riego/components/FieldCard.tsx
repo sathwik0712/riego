@@ -2,10 +2,11 @@
 // Displays field name/nickname, crop, soil moisture progress bar, and operational status
 // Responsive: compact view on phone/tablet, expanded details on desktop
 
+import Link from "next/link";
 import { STRINGS } from "../lib/strings";
 import { Field, BackendField, FieldConditions } from "../lib/types";
 import { getFieldMoistureDisplay, timeAgo } from "../lib/fieldStatus";
-import { ClockIcon } from "./icons";
+import { ClockIcon, EditIcon } from "./icons";
 import Sparkline from "./Sparkline";
 
 interface FieldCardProps {
@@ -15,6 +16,7 @@ interface FieldCardProps {
   // 7-day daily averages for the sparkline trend (one number per day, oldest first)
   // Undefined or fewer than 2 points → shows "Not enough data yet"
   trendData?: number[];
+  showEnterReading?: boolean;
 }
 
 // Format sowing date as "14 Oct 2026"
@@ -33,7 +35,13 @@ function formatSownDate(dateStr?: string | null): string {
   }
 }
 
-export default function FieldCard({ field, conditions, conditionsError, trendData }: FieldCardProps) {
+export default function FieldCard({
+  field,
+  conditions,
+  conditionsError,
+  trendData,
+  showEnterReading = false,
+}: FieldCardProps) {
   // Determine if this is a real BackendField or legacy mock Field
   const isBackend = "latitude" in field || "registered_at" in field;
   
@@ -58,6 +66,11 @@ export default function FieldCard({ field, conditions, conditionsError, trendDat
   const hasSensor = isBackend
     ? (field as BackendField).has_sensor
     : Boolean((field as Field).sensorStatus);
+
+  // Check if current reading source is manual
+  const isManual =
+    conditions?.soil_moisture?.source === "manual" ||
+    (conditions?.soil_moisture?.device_id || "").startsWith("manual-");
 
   // Device ID: show "—" when null/undefined/the literal string "null" instead of the text "null"
   const rawDeviceId = isBackend ? (field as BackendField).device_id : null;
@@ -196,7 +209,12 @@ export default function FieldCard({ field, conditions, conditionsError, trendDat
           <div>
             <p className="text-sm text-[#5F6E62]">Sensor</p>
             <div className="mt-0.5">
-              {!hasSensor ? (
+              {isManual ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-sm font-semibold bg-[#EAF5EB] text-[#1E5128] border border-[#A3D9A5] whitespace-nowrap">
+                  <EditIcon className="w-3.5 h-3.5" />
+                  <span>Manual</span>
+                </span>
+              ) : !hasSensor ? (
                 <span className="text-sm text-[#5F6E62] font-medium">None</span>
               ) : status.isStale ? (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-sm font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FCD34D] whitespace-nowrap">
@@ -251,6 +269,19 @@ export default function FieldCard({ field, conditions, conditionsError, trendDat
           </div>
         </div>
       </div>
+
+      {/* ── Fields page action: Enter reading button (>=56px tall) ── */}
+      {showEnterReading && (
+        <div className="pt-4 mt-4 border-t border-[#F2EFE4]">
+          <Link
+            href={`/fields/${field.id}/reading`}
+            className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
+          >
+            <EditIcon className="w-5 h-5 text-[#235334]" />
+            <span>Enter reading</span>
+          </Link>
+        </div>
+      )}
     </article>
   );
 }

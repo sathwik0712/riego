@@ -56,13 +56,17 @@ def get_field_conditions(db: Session, field: models.Field) -> Dict[str, Any]:
 
     moisture_level = _compute_moisture_level(sensor_info.get("moisture_percent"))
 
+    device_id = sensor_info.get("device_id")
+    source = "manual" if str(device_id or "").startswith("manual-") else "sensor"
+
     soil_moisture = {
         "status": sensor_info.get("status", "no_data"),
         "message": sensor_info.get("message", ""),
         "moisture_percent": sensor_info.get("moisture_percent"),
         "level": moisture_level,
         "measured_at": sensor_info.get("measured_at"),
-        "device_id": sensor_info.get("device_id"),
+        "device_id": device_id,
+        "source": source,
     }
 
     # 3. Retrieve weather with in-memory caching, history saving, and 2-day rain outlook

@@ -15,6 +15,7 @@ import {
   FarmerProfile,
   FieldConditions,
   FieldCreateData,
+  ManualReadingResponse,
   ScheduleItem,
   SensorHistoryResponse,
 } from "./types";
@@ -161,6 +162,21 @@ export async function getFields(): Promise<BackendField[]> {
     }
     throw err;
   }
+}
+
+// Fetch a single field by ID
+export async function getField(fieldId: number): Promise<BackendField> {
+  return apiGet<BackendField>(`/fields/${fieldId}`);
+}
+
+// Record a manual soil moisture reading for a field
+export async function addManualReading(
+  fieldId: number,
+  moisturePercent: number
+): Promise<ManualReadingResponse> {
+  return apiPost<ManualReadingResponse>(`/fields/${fieldId}/manual-reading`, {
+    moisture_percent: moisturePercent,
+  });
 }
 
 // Register a new field on the backend

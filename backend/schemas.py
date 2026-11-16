@@ -283,6 +283,36 @@ class SensorReadingOut(BaseModel):
             orm_mode = True
 
 
+# Schema for recording manual soil moisture readings
+class ManualReadingCreate(BaseModel):
+    moisture_percent: float
+
+    # Moisture percentage must be a number between 0 and 100
+    @field_validator("moisture_percent")
+    @classmethod
+    def validate_moisture_percent(cls, v):
+        if isinstance(v, bool):
+            raise ValueError("Moisture percentage must be a number between 0 and 100")
+        if v < 0.0 or v > 100.0:
+            raise ValueError("Moisture percentage must be between 0 and 100")
+        return v
+
+
+# Schema for returning manual soil moisture reading confirmation
+class ManualReadingOut(BaseModel):
+    field_id: int
+    moisture_percent: float
+    time: datetime
+    source: str = "manual"
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
 
 # Allowed language choices
 VALID_LANGUAGES = {"en", "hi", "kn"}

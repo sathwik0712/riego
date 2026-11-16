@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 import models
-from schemas import FieldCreate, FieldOut
+from schemas import FieldCreate, FieldOut, ManualReadingCreate, ManualReadingOut
 from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
 from services.conditions import get_field_conditions
 
@@ -108,4 +108,56 @@ def get_field_conditions_endpoint(field_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while gathering field conditions."
         )
+
+
+# Record a manual soil moisture reading for a field
+@router.post("/{field_id}/manual-reading", response_model=ManualReadingOut, status_code=status.HTTP_201_CREATED)
+@router.post("/{field_id}/manual-reading/", response_model=ManualReadingOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
+def create_manual_reading(
+    field_id: int,
+    reading_in: ManualReadingCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Record a manual soil moisture reading (0 to 100%) for a field.
+    Flows through the same pipeline as sensor readings so history and conditions reflect it.
+    """
+    # 404 if the field does not exist
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Field not found"
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    # Manual readings have no real raw sensor value, so raw_value stores the typed moisture percent rounded to a whole number
+    rounded_raw = int(round(reading_in.moisture_percent))
+    device_id = f"manual-{field.id}"
+
+    new_reading = models.SensorReading(
+        time=now_utc,
+        device_id=device_id,
+        field_id=field.id,
+        raw_value=rounded_raw,
+        moisture_percent=reading_in.moisture_percent,
+    )
+
+    try:
+        db.add(new_reading)
+        db.commit()
+        db.refresh(new_reading)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save manual reading."
+        )
+
+    return {
+        "field_id": field.id,
+        "moisture_percent": reading_in.moisture_percent,
+        "time": new_reading.time,
+        "source": "manual",
+    }
 

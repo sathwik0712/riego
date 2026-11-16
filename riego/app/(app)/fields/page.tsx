@@ -164,6 +164,7 @@ export default function FieldsPage() {
                 conditions={conditions}
                 conditionsError={conditionsError}
                 trendData={trendData}
+                showEnterReading={true}
               />
             ))}
 

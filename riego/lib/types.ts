@@ -177,6 +177,14 @@ export interface SensorHistoryResponse {
   readings: SensorReading[];
 }
 
+// Response from POST /fields/{field_id}/manual-reading
+export interface ManualReadingResponse {
+  field_id: number;
+  moisture_percent: number;
+  time: string;
+  source: "manual";
+}
+
 // Real field record returned by GET /fields and POST /fields
 export interface BackendField {
   id: number;
@@ -228,6 +236,7 @@ export interface FieldConditions {
     level?: "dry" | "okay" | "good" | null;
     measured_at?: string | null;
     device_id?: string | null;
+    source?: "sensor" | "manual" | string;
   };
   weather: {
     available: boolean;

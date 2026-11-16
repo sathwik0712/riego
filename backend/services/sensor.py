@@ -13,29 +13,28 @@ def get_field_latest_sensor_reading(db: Session, field: models.Field) -> Dict[st
     """
     Retrieve and evaluate the latest sensor reading for a field.
     Returns status ('ok', 'stale', 'no_data', 'no_sensor') and reading metrics.
+    Finds readings by field_id so both hardware and manual readings are supported.
     """
-    # No sensor registered on this field
-    if not field.has_sensor:
-        return {
-            "status": "no_sensor",
-            "message": "This field has no sensor installed.",
-            "moisture_percent": None,
-            "measured_at": None,
-            "time": None,
-            "device_id": None,
-            "age_minutes": None,
-        }
-
-    # Fetch the most recent reading for this field's device
+    # Fetch the most recent reading for this field (hardware sensor or manual)
     latest = (
         db.query(models.SensorReading)
-        .filter(models.SensorReading.device_id == field.device_id)
+        .filter(models.SensorReading.field_id == field.id)
         .order_by(models.SensorReading.time.desc())
         .first()
     )
 
-    # Sensor exists but no readings recorded yet
+    # If no reading exists at all, determine whether sensor is missing or waiting for data
     if latest is None:
+        if not field.has_sensor:
+            return {
+                "status": "no_sensor",
+                "message": "This field has no sensor installed.",
+                "moisture_percent": None,
+                "measured_at": None,
+                "time": None,
+                "device_id": None,
+                "age_minutes": None,
+            }
         return {
             "status": "no_data",
             "message": "Sensor is registered but no readings have been received yet.",
