@@ -15,6 +15,8 @@ import {
   FarmerProfile,
   FieldConditions,
   FieldCreateData,
+  IrrigationLogEntry,
+  IrrigationLogResponse,
   ManualReadingResponse,
   ScheduleItem,
   SensorHistoryResponse,
@@ -192,6 +194,28 @@ export async function getFieldConditions(fieldId: number): Promise<FieldConditio
 // Fetch sensor reading history for a field for the last N hours (default 168 = 7 days)
 export async function getSensorHistory(fieldId: number, hours = 168): Promise<SensorHistoryResponse> {
   return apiGet<SensorHistoryResponse>(`/sensor-readings/${fieldId}/history?hours=${hours}`);
+}
+
+// Record an irrigation event for a field (started_at = now UTC, source = "farmer", no recommendation id)
+export async function logIrrigation(
+  fieldId: number,
+  durationMinutes: number
+): Promise<IrrigationLogEntry> {
+  return apiPost<IrrigationLogEntry>("/irrigation-log", {
+    field_id: fieldId,
+    duration_minutes: durationMinutes,
+    started_at: new Date().toISOString(),
+    source: "farmer",
+    recommendation_id: null,
+  });
+}
+
+// Fetch irrigation logs for a field over the last N days (default 1 day)
+export async function getIrrigationLog(
+  fieldId: number,
+  days = 1
+): Promise<IrrigationLogResponse> {
+  return apiGet<IrrigationLogResponse>(`/fields/${fieldId}/irrigation-log?days=${days}`);
 }
 
 export async function getTodaySchedule(): Promise<ScheduleItem[]> {

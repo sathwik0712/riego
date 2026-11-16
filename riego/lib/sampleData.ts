@@ -241,9 +241,9 @@ export function addSampleField(formData: FieldFormData): Field {
 // ── Today's schedule ────────────────────────────────────────────────────────
 
 export const sampleSchedule: ScheduleItem[] = [
-  { id: "sch-1", time: "6:00 AM",  fieldName: "Field 1", durationMinutes: 30, done: false },
-  { id: "sch-2", time: "9:30 AM",  fieldName: "Field 3", durationMinutes: 20, done: false },
-  { id: "sch-3", time: "5:00 PM",  fieldName: "Field 2", durationMinutes: 45, done: false },
+  { id: "sch-1", fieldId: 1, time: "6:00 AM",  fieldName: "Field 1", durationMinutes: 30, done: false },
+  { id: "sch-2", fieldId: 3, time: "9:30 AM",  fieldName: "Field 3", durationMinutes: 20, done: false },
+  { id: "sch-3", fieldId: 2, time: "5:00 PM",  fieldName: "Field 2", durationMinutes: 45, done: false },
 ];
 
 // ── Recent alerts ───────────────────────────────────────────────────────────

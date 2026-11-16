@@ -38,10 +38,12 @@ export interface MoistureTarget {
 // One upcoming irrigation event in today's schedule
 export interface ScheduleItem {
   id: string;
+  fieldId?: number | string; // Optional link to a registered field id
   time: string;            // e.g. "6:00 AM"
   fieldName: string;
   durationMinutes: number;
   done: boolean;
+  doneAt?: string;         // e.g. "6:30 AM" or formatted completion timestamp
 }
 
 // Alert severity levels
@@ -190,6 +192,7 @@ export interface BackendField {
   id: number;
   farmer_id: string;
   nickname?: string | null;
+  name?: string | null;
   latitude: number;
   longitude: number;
   area: number;
@@ -249,6 +252,23 @@ export interface FieldConditions {
   notes: string[];
 }
 
+// Single irrigation log entry returned by POST /irrigation-log and GET /fields/{field_id}/irrigation-log
+export interface IrrigationLogEntry {
+  id: number;
+  field_id: number;
+  started_at: string;
+  duration_minutes: number;
+  water_liters?: number | null;
+  source: string;
+  recommendation_id?: number | null;
+  created_at: string;
+}
 
-
+// History response from GET /fields/{field_id}/irrigation-log
+export interface IrrigationLogResponse {
+  field_id: number;
+  days: number;
+  count: number;
+  logs: IrrigationLogEntry[];
+}
 
