@@ -7,6 +7,7 @@ import models
 from schemas import FieldCreate, FieldOut, ManualReadingCreate, ManualReadingOut
 from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
 from services.conditions import get_field_conditions
+from pump import resolve_pump_flow
 
 # APIRouter for field-related endpoints
 router = APIRouter(prefix="/fields", tags=["Fields"])
@@ -24,6 +25,9 @@ def create_field(field_in: FieldCreate, db: Session = Depends(get_db)):
                 detail=f"Device ID '{field_in.device_id}' is already in use by another field."
             )
 
+    # Resolve pump flow rate and source based on typed flow or horsepower
+    flow_lph, flow_source = resolve_pump_flow(field_in.pump_flow_rate, field_in.pump_hp)
+
     # Instantiate the new field with fixed farmer_id "farmer_001"
     new_field = models.Field(
         farmer_id="farmer_001",
@@ -37,7 +41,9 @@ def create_field(field_in: FieldCreate, db: Session = Depends(get_db)):
         soil_type=field_in.soil_type,
         water_source=field_in.water_source,
         irrigation_method=field_in.irrigation_method,
-        pump_flow_rate=field_in.pump_flow_rate,
+        pump_flow_rate=flow_lph,
+        pump_hp=field_in.pump_hp,
+        pump_flow_source=flow_source,
         has_sensor=field_in.has_sensor,
         device_id=field_in.device_id if field_in.device_id else None,
     )
@@ -84,6 +90,7 @@ def get_latest_reading(field_id: int, db: Session = Depends(get_db)):
         "moisture_percent": reading["moisture_percent"],
         "time": reading["time"],
         "age_minutes": reading["age_minutes"],
+        "source": reading.get("source"),
     }
 
 # Get combined conditions (soil moisture, weather, crop, notes) for a field
@@ -141,6 +148,7 @@ def create_manual_reading(
         field_id=field.id,
         raw_value=rounded_raw,
         moisture_percent=reading_in.moisture_percent,
+        source="manual",
     )
 
     try:

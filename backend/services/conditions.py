@@ -57,7 +57,11 @@ def get_field_conditions(db: Session, field: models.Field) -> Dict[str, Any]:
     moisture_level = _compute_moisture_level(sensor_info.get("moisture_percent"))
 
     device_id = sensor_info.get("device_id")
-    source = "manual" if str(device_id or "").startswith("manual-") else "sensor"
+    source = sensor_info.get("source")
+    if not source and device_id:
+        source = "manual" if str(device_id).startswith("manual-") else "sensor"
+    elif not source:
+        source = None
 
     soil_moisture = {
         "status": sensor_info.get("status", "no_data"),

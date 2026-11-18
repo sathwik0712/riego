@@ -183,7 +183,35 @@ export async function addManualReading(
 
 // Register a new field on the backend
 export async function createField(data: FieldCreateData): Promise<BackendField> {
-  return apiPost<BackendField>("/fields", data);
+  const payload: Record<string, any> = { ...data };
+
+  // Only send pump_flow_rate if farmer gave one (> 0); never send 0 or empty string
+  if (
+    payload.pump_flow_rate === undefined ||
+    payload.pump_flow_rate === null ||
+    payload.pump_flow_rate === "" ||
+    Number(payload.pump_flow_rate) <= 0 ||
+    isNaN(Number(payload.pump_flow_rate))
+  ) {
+    delete payload.pump_flow_rate;
+  } else {
+    payload.pump_flow_rate = Number(payload.pump_flow_rate);
+  }
+
+  // Only send pump_hp if farmer gave one (> 0); never send 0 or empty string
+  if (
+    payload.pump_hp === undefined ||
+    payload.pump_hp === null ||
+    payload.pump_hp === "" ||
+    Number(payload.pump_hp) <= 0 ||
+    isNaN(Number(payload.pump_hp))
+  ) {
+    delete payload.pump_hp;
+  } else {
+    payload.pump_hp = Number(payload.pump_hp);
+  }
+
+  return apiPost<BackendField>("/fields", payload as FieldCreateData);
 }
 
 // Fetch telemetry and combined conditions for a single field

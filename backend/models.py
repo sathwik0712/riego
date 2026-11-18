@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Index, JSON
 from sqlalchemy.sql import func
 from database import Base
 
@@ -47,8 +47,14 @@ class Field(Base):
     water_source = Column(String, nullable=False)
     irrigation_method = Column(String, nullable=False)
 
-    # Optional pump flow rate
+    # Optional pump flow rate (unit: litres per hour, L/h)
     pump_flow_rate = Column(Float, nullable=True)
+
+    # Optional pump horsepower (HP)
+    pump_hp = Column(Float, nullable=True)
+
+    # Source of pump flow rate: "typed", "estimated_from_hp", or "default"
+    pump_flow_source = Column(String, nullable=True)
 
     # Required hardware sensor flag
     has_sensor = Column(Boolean, nullable=False)
@@ -75,6 +81,9 @@ class SensorReading(Base):
 
     # Moisture percentage (optional, calculated in later steps)
     moisture_percent = Column(Float, nullable=True)
+
+    # Reading source: "sensor" or "manual"
+    source = Column(String, nullable=True)
 
 
 # Weather reading history: one row is saved each time fresh weather is fetched
@@ -146,6 +155,12 @@ class IrrigationLog(Base):
     water_liters = Column(Float, nullable=True)                      # optional
     source = Column(String, nullable=False, default="farmer")        # "farmer" or "auto"
 
+    # Event origin: "farmer_tap", "manual_entry", or "sensor_detected"
+    event_source = Column(String, nullable=True)
+
+    # Actual watering timestamp in UTC (watering time, which can differ from tap time)
+    irrigated_at = Column(DateTime(timezone=True), nullable=True)
+
     # Optional reference to a recommendation that prompted this irrigation
     recommendation_id = Column(Integer, ForeignKey("recommendations.id"), nullable=True)
 
@@ -156,5 +171,33 @@ class IrrigationLog(Base):
     __table_args__ = (
         Index("ix_irrigation_logs_field_started_at", field_id, started_at.desc()),
     )
+
+
+# Weather forecast snapshots: captures 24h summary and 5-day daily forecast for ML training
+class ForecastSnapshot(Base):
+    __tablename__ = "forecast_snapshots"
+
+    # Primary key (auto-incremented integer)
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Required field ID referencing fields table
+    field_id = Column(Integer, ForeignKey("fields.id"), nullable=False, index=True)
+
+    # Fetch timestamp in UTC
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # 24-hour summary metrics
+    rain_next_24h_mm = Column(Float, nullable=True)
+    rain_chance_next_24h = Column(Float, nullable=True)
+    max_temp_next_24h = Column(Float, nullable=True)
+
+    # 5-day daily forecast summary
+    daily_summary = Column(JSON, nullable=True)
+
+    # Composite index on (field_id, fetched_at)
+    __table_args__ = (
+        Index("ix_forecast_snapshots_field_fetched_at", field_id, fetched_at),
+    )
+
 
 

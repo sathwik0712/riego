@@ -51,6 +51,7 @@ def create_sensor_reading(reading_in: SensorReadingCreate, db: Session = Depends
         field_id=field.id,
         raw_value=reading_in.raw_value,
         moisture_percent=moisture_percent,
+        source="sensor",
     )
 
     try:
@@ -103,6 +104,7 @@ def get_field_sensor_history(
             "moisture_percent": r.moisture_percent,
             "raw_value": r.raw_value,
             "device_id": r.device_id,
+            "source": r.source if r.source else ("manual" if str(r.device_id or "").startswith("manual-") else "sensor"),
         }
         for r in readings
     ]

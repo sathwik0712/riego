@@ -34,6 +34,7 @@ def get_field_latest_sensor_reading(db: Session, field: models.Field) -> Dict[st
                 "time": None,
                 "device_id": None,
                 "age_minutes": None,
+                "source": None,
             }
         return {
             "status": "no_data",
@@ -43,6 +44,7 @@ def get_field_latest_sensor_reading(db: Session, field: models.Field) -> Dict[st
             "time": None,
             "device_id": field.device_id,
             "age_minutes": None,
+            "source": None,
         }
 
     # Calculate how old the latest reading is
@@ -57,6 +59,8 @@ def get_field_latest_sensor_reading(db: Session, field: models.Field) -> Dict[st
         else "Sensor is active and reporting current readings."
     )
 
+    source = latest.source if latest.source else ("manual" if str(latest.device_id or "").startswith("manual-") else "sensor")
+
     return {
         "status": reading_status,
         "message": message,
@@ -65,4 +69,5 @@ def get_field_latest_sensor_reading(db: Session, field: models.Field) -> Dict[st
         "time": reading_time,
         "device_id": latest.device_id,
         "age_minutes": age_minutes,
+        "source": source,
     }

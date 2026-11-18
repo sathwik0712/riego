@@ -12,11 +12,12 @@ import {
   cropOptions,
   initialFieldFormData,
   irrigationMethodOptions,
+  pumpHpOptions,
   soilTypeOptions,
   waterSourceOptions,
 } from "../lib/sampleData";
 import { createField } from "../lib/api";
-import { AlertIcon } from "./icons";
+import { AlertIcon, CheckIcon, HelpCircleIcon, ZapIcon } from "./icons";
 
 // Step titles and icons for the progress indicator
 const STEP_CONFIG = [
@@ -144,6 +145,22 @@ export default function FieldRegistrationForm() {
       setErrorMessage("Please select your irrigation method.");
       return false;
     }
+    // If a flow is typed, it must be above 0, with a plain error message
+    if (formData.pumpFlowRate !== "" && !formData.pumpFlowRateUnknown) {
+      const flowNum = Number(formData.pumpFlowRate);
+      if (isNaN(flowNum) || flowNum <= 0) {
+        setErrorMessage("Pump flow rate must be greater than 0.");
+        return false;
+      }
+    }
+    // If horsepower is selected, it must be greater than 0 and at most 50
+    if (formData.pumpHp !== "" && formData.pumpHp !== undefined && !formData.pumpHpUnknown) {
+      const hpNum = Number(formData.pumpHp);
+      if (isNaN(hpNum) || hpNum <= 0 || hpNum > 50) {
+        setErrorMessage("Pump horsepower must be greater than 0 and at most 50.");
+        return false;
+      }
+    }
     return true;
   };
 
@@ -192,10 +209,16 @@ export default function FieldRegistrationForm() {
       // 2. Map water source to allowed backend enum ("Borewell" | "Canal" | "Tank" | "Rain-fed")
       const waterSource = mapWaterSource(formData.waterSource);
 
-      // 3. Optional pump flow rate
-      const pumpFlowRate = formData.pumpFlowRateUnknown || !formData.pumpFlowRate
-        ? null
-        : Number(formData.pumpFlowRate);
+      // 3. Optional pump flow rate and horsepower
+      const pumpFlowRate =
+        formData.pumpFlowRateUnknown || !formData.pumpFlowRate || Number(formData.pumpFlowRate) <= 0
+          ? null
+          : Number(formData.pumpFlowRate);
+
+      const pumpHp =
+        formData.pumpHpUnknown || !formData.pumpHp || Number(formData.pumpHp) <= 0
+          ? null
+          : Number(formData.pumpHp);
 
       // 4. Sowing date (null if not sown yet)
       const sowingDate = formData.notSownYet || !formData.sowingDate
@@ -219,6 +242,7 @@ export default function FieldRegistrationForm() {
         water_source: waterSource,
         irrigation_method: formData.irrigationMethod,
         pump_flow_rate: pumpFlowRate,
+        pump_hp: pumpHp,
         has_sensor: hasSensor,
         device_id: deviceId,
       };
@@ -919,64 +943,154 @@ export default function FieldRegistrationForm() {
             </div>
           </div>
 
-          {/* 4. Pump Flow Rate (Optional with "I don't know" button) */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label
-                htmlFor="flowrate-input"
-                className="text-sm font-extrabold text-[#1B2D21] flex items-center gap-2"
-              >
-                <span>⚡</span>
-                <span>Pump Flow Rate (Optional)</span>
-              </label>
-              <span className="text-xs text-[#5F6E62] font-semibold">Optional</span>
+          {/* 4. Pump Flow Rate and Horsepower */}
+          <div className="flex flex-col gap-4 pt-2 border-t border-[#EFEAD8]">
+            {/* Flow Rate Input */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="flowrate-input"
+                  className="text-sm font-extrabold text-[#1B2D21] flex items-center gap-2"
+                >
+                  <ZapIcon className="w-4 h-4 text-[#235334]" />
+                  <span>Pump flow rate (litres per hour)</span>
+                </label>
+                <span className="text-xs text-[#5F6E62] font-semibold">Optional</span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div
+                  className={`relative flex-1 flex items-center min-h-[56px] rounded-2xl border transition-all ${
+                    formData.pumpFlowRateUnknown
+                      ? "bg-[#F4F1E6] border-[#DCD6C0] cursor-not-allowed"
+                      : "bg-white border-[#DCD6C0] focus-within:ring-2 focus-within:ring-[#235334]"
+                  }`}
+                >
+                  <input
+                    id="flowrate-input"
+                    type="number"
+                    min={1}
+                    disabled={formData.pumpFlowRateUnknown}
+                    value={formData.pumpFlowRate}
+                    onChange={(e) => {
+                      updateField(
+                        "pumpFlowRate",
+                        e.target.value === "" ? "" : Number(e.target.value)
+                      );
+                    }}
+                    placeholder="e.g. 9000"
+                    className={`w-full h-full pl-4 pr-16 py-3 rounded-2xl bg-transparent text-base font-bold outline-none ${
+                      formData.pumpFlowRateUnknown
+                        ? "text-[#8F9E92] cursor-not-allowed"
+                        : "text-[#1B2D21]"
+                    }`}
+                  />
+                  <span
+                    className="absolute right-4 text-xs sm:text-sm font-bold text-[#5F6E62] pointer-events-none select-none"
+                    aria-hidden="true"
+                  >
+                    L/h
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextUnknown = !formData.pumpFlowRateUnknown;
+                    updateField("pumpFlowRateUnknown", nextUnknown);
+                    if (nextUnknown) {
+                      updateField("pumpFlowRate", "");
+                    }
+                  }}
+                  className={`min-h-[56px] px-5 py-3 rounded-2xl border-2 flex items-center justify-center gap-2 font-bold text-sm sm:text-base transition-all cursor-pointer ${
+                    formData.pumpFlowRateUnknown
+                      ? "border-[#235334] bg-[#EAF5EB] text-[#235334] shadow-sm"
+                      : "border-[#DCD6C0] bg-white text-[#5F6E62] hover:bg-[#FAF7EE]"
+                  }`}
+                >
+                  <HelpCircleIcon className="w-5 h-5 text-[#5F6E62]" />
+                  <span>I don&apos;t know</span>
+                  {formData.pumpFlowRateUnknown && (
+                    <span className="text-xs font-bold text-[#2E7D32] bg-white p-1 rounded-full border border-[#A3D9A5]">
+                      <CheckIcon className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                id="flowrate-input"
-                type="number"
-                disabled={formData.pumpFlowRateUnknown}
-                value={formData.pumpFlowRate}
-                onChange={(e) => {
-                  updateField(
-                    "pumpFlowRate",
-                    e.target.value === "" ? "" : Number(e.target.value)
-                  )
-                }}
-                placeholder="e.g. 50 (Litres/min or HP)"
-                className={`flex-1 min-h-[56px] px-4 py-3 rounded-2xl border text-base font-bold transition-all ${
-                  formData.pumpFlowRateUnknown
-                    ? "bg-[#F4F1E6] border-[#DCD6C0] text-[#8F9E92] cursor-not-allowed"
-                    : "bg-white border-[#DCD6C0] text-[#1B2D21] focus:ring-2 focus:ring-[#235334]"
-                }`}
-              />
+            {/* Pump Horsepower Option Cards */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-extrabold text-[#1B2D21] flex items-center gap-2">
+                  <ZapIcon className="w-4 h-4 text-[#235334]" />
+                  <span>Pump Horsepower</span>
+                </label>
+                <span className="text-xs text-[#5F6E62] font-semibold">Optional</span>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const nextUnknown = !formData.pumpFlowRateUnknown;
-                  updateField("pumpFlowRateUnknown", nextUnknown);
-                  if (nextUnknown) {
-                    updateField("pumpFlowRate", "");
-                  }
-                }}
-                className={`min-h-[56px] px-5 py-3 rounded-2xl border-2 flex items-center justify-center gap-2 font-bold text-sm sm:text-base transition-all cursor-pointer ${
-                  formData.pumpFlowRateUnknown
-                    ? "border-[#235334] bg-[#EAF5EB] text-[#235334] shadow-sm"
-                    : "border-[#DCD6C0] bg-white text-[#5F6E62] hover:bg-[#FAF7EE]"
-                }`}
-              >
-                <span className="text-xl" aria-hidden="true">🤷‍♂️</span>
-                <span>I don&apos;t know</span>
-                {formData.pumpFlowRateUnknown && (
-                  <span className="text-xs text-[#2E7D32]">✓</span>
-                )}
-              </button>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {pumpHpOptions.map((opt) => {
+                  const isSelected = formData.pumpHp === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => {
+                        if (isSelected) {
+                          updateField("pumpHp", "");
+                        } else {
+                          updateField("pumpHp", opt.value);
+                          updateField("pumpHpUnknown", false);
+                        }
+                      }}
+                      className={`min-h-[56px] p-3 rounded-2xl border-2 flex items-center justify-between text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? "border-[#235334] bg-[#EAF5EB] text-[#235334] shadow-sm font-extrabold"
+                          : "border-[#DCD6C0] bg-white text-[#1B2D21] hover:bg-[#FAF7EE] font-bold"
+                      }`}
+                    >
+                      <span className="text-sm sm:text-base">{opt.label}</span>
+                      {isSelected && (
+                        <span className="text-xs font-bold text-[#2E7D32] bg-white p-1 rounded-full border border-[#A3D9A5]">
+                          <CheckIcon className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {/* "I don't know" card for horsepower */}
+                <button
+                  type="button"
+                  aria-pressed={Boolean(formData.pumpHpUnknown)}
+                  onClick={() => {
+                    const nextUnknown = !formData.pumpHpUnknown;
+                    updateField("pumpHpUnknown", nextUnknown);
+                    if (nextUnknown) {
+                      updateField("pumpHp", "");
+                    }
+                  }}
+                  className={`min-h-[56px] p-3 rounded-2xl border-2 flex items-center justify-between text-left transition-all cursor-pointer ${
+                    formData.pumpHpUnknown
+                      ? "border-[#235334] bg-[#EAF5EB] text-[#235334] shadow-sm font-extrabold"
+                      : "border-[#DCD6C0] bg-white text-[#5F6E62] hover:bg-[#FAF7EE] font-bold"
+                  }`}
+                >
+                  <span className="text-sm sm:text-base">I don&apos;t know</span>
+                  {formData.pumpHpUnknown && (
+                    <span className="text-xs font-bold text-[#2E7D32] bg-white p-1 rounded-full border border-[#A3D9A5]">
+                      <CheckIcon className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              <p className="text-xs text-[#5F6E62] mt-1 leading-snug">
+                If you don&apos;t know the flow, choose your pump&apos;s horsepower and we will estimate it.
+              </p>
             </div>
-            <p className="text-xs text-[#5F6E62]">
-              If unknown, Riego will estimate pump time using regional averages.
-            </p>
           </div>
         </div>
       )}
@@ -1281,11 +1395,28 @@ export default function FieldRegistrationForm() {
                 <strong className="text-[#1B2D21]">{formData.irrigationMethod}</strong>
               </div>
               <div>
-                <span className="text-[#5F6E62]">Pump Flow Rate:</span>{" "}
+                <span className="text-[#5F6E62]">Pump:</span>{" "}
                 <strong className="text-[#1B2D21]">
-                  {formData.pumpFlowRateUnknown
-                    ? "Unknown (Regional avg used)"
-                    : formData.pumpFlowRate ? `${formData.pumpFlowRate} L/min` : "Not specified"}
+                  {(() => {
+                    const hasFlow =
+                      !formData.pumpFlowRateUnknown &&
+                      formData.pumpFlowRate !== "" &&
+                      Number(formData.pumpFlowRate) > 0;
+                    const hasHp =
+                      !formData.pumpHpUnknown &&
+                      formData.pumpHp !== "" &&
+                      formData.pumpHp !== undefined &&
+                      formData.pumpHp !== null &&
+                      Number(formData.pumpHp) > 0;
+
+                    if (hasFlow) {
+                      return `${Number(formData.pumpFlowRate).toLocaleString()} litres per hour`;
+                    }
+                    if (hasHp) {
+                      return `${formData.pumpHp} HP (flow will be estimated)`;
+                    }
+                    return "Not given (a default will be used)";
+                  })()}
                 </strong>
               </div>
             </div>

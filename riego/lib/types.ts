@@ -137,8 +137,11 @@ export interface FieldFormData {
   soilType: string; // Required: "Sandy" | "Loamy" | "Clay"
   waterSource: string; // Required: "Borewell" | "Canal" | "Tank" | "Rain-fed only"
   irrigationMethod: string; // Required: "Drip" | "Sprinkler" | "Flood"
-  pumpFlowRate: number | ""; // Optional flow rate
+  pumpFlowRate: number | ""; // Optional flow rate (L/h)
   pumpFlowRateUnknown: boolean; // Flag if farmer clicked "I don't know"
+  pump_hp?: number | null; // Optional pump horsepower
+  pumpHp?: number | ""; // Optional pump horsepower in form state
+  pumpHpUnknown?: boolean; // Flag if farmer clicked "I don't know" for HP
 
   // Screen 4: Sensor device
   hasSensor: boolean | null; // Required choice: true (Yes) or false (Not yet)
@@ -203,6 +206,8 @@ export interface BackendField {
   water_source: string;
   irrigation_method: string;
   pump_flow_rate?: number | null;
+  pump_hp?: number | null;
+  pump_flow_source?: string | null;
   has_sensor: boolean;
   device_id?: string | null;
   registered_at: string;
@@ -222,6 +227,7 @@ export interface FieldCreateData {
   water_source: string;
   irrigation_method: string;
   pump_flow_rate?: number | null;
+  pump_hp?: number | null;
   has_sensor: boolean;
   device_id?: string | null;
 }

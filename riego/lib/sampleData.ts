@@ -186,6 +186,20 @@ export const areaUnitOptions: FormOption[] = [
   { id: "guntas", label: "Guntas", icon: "📐", hint: "1 Gunta = 1/40th of an Acre" },
 ];
 
+// Pump horsepower options for Screen 3
+export interface PumpHpOption {
+  value: number;
+  label: string;
+}
+
+export const pumpHpOptions: PumpHpOption[] = [
+  { value: 0.5, label: "0.5 HP" },
+  { value: 1, label: "1 HP" },
+  { value: 2, label: "2 HP" },
+  { value: 3, label: "3 HP" },
+  { value: 5, label: "5 HP" },
+];
+
 // Initial blank form data for a new field registration
 export const initialFieldFormData: FieldFormData = {
   id: "fld-104",
@@ -204,6 +218,8 @@ export const initialFieldFormData: FieldFormData = {
   irrigationMethod: "",
   pumpFlowRate: "",
   pumpFlowRateUnknown: false,
+  pumpHp: "",
+  pumpHpUnknown: false,
   hasSensor: null,
   deviceId: "",
 };

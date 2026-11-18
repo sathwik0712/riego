@@ -1,6 +1,6 @@
 import re
 from datetime import date, datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel
 from growth import get_growth_stage
 
@@ -21,6 +21,7 @@ VALID_RECOMMENDATION_ACTIONS = {"water", "wait"}
 VALID_RECOMMENDATION_STATUSES = {"pending", "done", "skipped"}
 VALID_RECOMMENDATION_SOURCES = {"rule", "ml"}
 VALID_IRRIGATION_LOG_SOURCES = {"farmer", "auto"}
+VALID_IRRIGATION_EVENT_SOURCES = {"farmer_tap", "manual_entry", "sensor_detected"}
 
 
 class FieldCreate(BaseModel):
@@ -34,7 +35,10 @@ class FieldCreate(BaseModel):
     soil_type: str
     water_source: str
     irrigation_method: str
+    # Optional pump flow rate in litres per hour (L/h)
     pump_flow_rate: Optional[float] = None
+    # Optional pump horsepower (HP), must be > 0 and at most 50
+    pump_hp: Optional[float] = None
     has_sensor: bool
     device_id: Optional[str] = None
 
@@ -121,12 +125,20 @@ class FieldCreate(BaseModel):
             raise ValueError("Area must be greater than 0")
         return v
 
-    # Pump flow rate must be greater than 0 if given
+    # Pump flow rate must be greater than 0 if given (unit: litres per hour, L/h)
     @field_validator("pump_flow_rate")
     @classmethod
     def validate_pump_flow_rate(cls, v):
         if v is not None and v <= 0:
             raise ValueError("Pump flow rate must be greater than 0")
+        return v
+
+    # Pump horsepower must be greater than 0 and at most 50 if given
+    @field_validator("pump_hp")
+    @classmethod
+    def validate_pump_hp(cls, v):
+        if v is not None and (v <= 0 or v > 50):
+            raise ValueError("Pump horsepower must be greater than 0 and at most 50")
         return v
 
     # Sowing date cannot be in the future
@@ -177,13 +189,15 @@ class FieldOut(FieldCreate):
     registered_at: datetime
     # Calculated dynamically without a database column
     growth_stage: str = ""
+    # Source of pump flow rate: "typed", "estimated_from_hp", or "default"
+    pump_flow_source: Optional[str] = None
 
     if IS_V2:
         model_config = ConfigDict(from_attributes=True)
 
         @model_validator(mode="after")
         def set_growth_stage(self):
-            self.growth_stage = get_growth_stage(self.sowing_date)
+            self.growth_stage = get_growth_stage(self.sowing_date, getattr(self, "crop", None))
             return self
     else:
         class Config:
@@ -192,7 +206,7 @@ class FieldOut(FieldCreate):
 
         @root_validator
         def set_growth_stage(cls, values):
-            values["growth_stage"] = get_growth_stage(values.get("sowing_date"))
+            values["growth_stage"] = get_growth_stage(values.get("sowing_date"), values.get("crop"))
             return values
 
 
@@ -274,13 +288,27 @@ class SensorReadingOut(BaseModel):
     field_id: int
     raw_value: int
     moisture_percent: Optional[float] = None
+    source: Optional[str] = None
 
     if IS_V2:
         model_config = ConfigDict(from_attributes=True)
+
+        @model_validator(mode="after")
+        def set_default_source(self):
+            if not self.source:
+                self.source = "manual" if str(self.device_id or "").startswith("manual-") else "sensor"
+            return self
     else:
         class Config:
             from_attributes = True
             orm_mode = True
+
+        @root_validator
+        def set_default_source(cls, values):
+            if not values.get("source"):
+                dev_id = str(values.get("device_id") or "")
+                values["source"] = "manual" if dev_id.startswith("manual-") else "sensor"
+            return values
 
 
 # Schema for recording manual soil moisture readings
@@ -504,6 +532,8 @@ class IrrigationLogCreate(BaseModel):
     duration_minutes: int
     water_liters: Optional[float] = None
     source: Optional[str] = "farmer"
+    event_source: Optional[str] = "farmer_tap"
+    irrigated_at: Optional[datetime] = None
     recommendation_id: Optional[int] = None
 
     # Duration minutes between 1 and 600
@@ -534,6 +564,32 @@ class IrrigationLogCreate(BaseModel):
             raise ValueError("Source must be 'farmer' or 'auto'")
         return v
 
+    # event_source must be "farmer_tap", "manual_entry", or "sensor_detected"
+    @field_validator("event_source")
+    @classmethod
+    def validate_event_source(cls, v):
+        if v is None:
+            return "farmer_tap"
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in VALID_IRRIGATION_EVENT_SOURCES:
+            raise ValueError(f"event_source must be one of: {', '.join(sorted(VALID_IRRIGATION_EVENT_SOURCES))}")
+        return v
+
+    # irrigated_at must not be in the future, and at most 7 days old
+    @field_validator("irrigated_at")
+    @classmethod
+    def validate_irrigated_at(cls, v):
+        if v is not None:
+            now_utc = datetime.now(timezone.utc)
+            v_utc = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+            if v_utc > now_utc + timedelta(seconds=10):
+                raise ValueError("irrigated_at must not be in the future")
+            if v_utc < now_utc - timedelta(days=7):
+                raise ValueError("irrigated_at cannot be more than 7 days old")
+            return v_utc
+        return v
+
 
 # Irrigation log output schema
 class IrrigationLogOut(BaseModel):
@@ -543,6 +599,8 @@ class IrrigationLogOut(BaseModel):
     duration_minutes: int
     water_liters: Optional[float] = None
     source: str
+    event_source: Optional[str] = "farmer_tap"
+    irrigated_at: Optional[datetime] = None
     recommendation_id: Optional[int] = None
     created_at: datetime
 
@@ -567,3 +625,37 @@ class IrrigationLogHistoryOut(BaseModel):
         class Config:
             from_attributes = True
             orm_mode = True
+
+
+# Weather forecast snapshot history response
+class ForecastSnapshotOut(BaseModel):
+    id: int
+    field_id: int
+    fetched_at: datetime
+    rain_next_24h_mm: Optional[float] = None
+    rain_chance_next_24h: Optional[float] = None
+    max_temp_next_24h: Optional[float] = None
+    daily_summary: Optional[Any] = None
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+
+
+# Detected irrigation event schema from sensor jumps
+class DetectedIrrigationEvent(BaseModel):
+    time: datetime
+    moisture_before: float
+    moisture_after: float
+    jump: float
+
+    if IS_V2:
+        model_config = ConfigDict(from_attributes=True)
+    else:
+        class Config:
+            from_attributes = True
+            orm_mode = True
+

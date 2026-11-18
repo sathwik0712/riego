@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from database import get_db
 import models
+from schemas import ForecastSnapshotOut
 from services.weather import fetch_field_weather, WeatherUnavailable
 
 # APIRouter for weather-related endpoints
@@ -59,6 +60,41 @@ def get_field_weather_history(
         "count": len(items),
         "readings": items,
     }
+
+
+# Retrieve historical forecast snapshots for a field over the last N hours, oldest first
+@router.get("/{field_id}/forecast-history", response_model=List[ForecastSnapshotOut])
+@router.get("/{field_id}/forecast-history/", response_model=List[ForecastSnapshotOut], include_in_schema=False)
+def get_field_forecast_history(
+    field_id: int,
+    hours: int = Query(default=72, ge=1, le=720),
+    db: Session = Depends(get_db)
+):
+    """
+    Get saved historical forecast snapshots for a field over the last N hours (oldest first).
+    """
+    # 404 if the field does not exist
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Field not found"
+        )
+
+    # Fetch snapshots within the last N hours, ordered oldest first
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    snapshots = (
+        db.query(models.ForecastSnapshot)
+        .filter(
+            models.ForecastSnapshot.field_id == field.id,
+            models.ForecastSnapshot.fetched_at >= cutoff
+        )
+        .order_by(models.ForecastSnapshot.fetched_at.asc(), models.ForecastSnapshot.id.asc())
+        .all()
+    )
+
+    return snapshots
+
 
 
 @router.get("/{field_id}")

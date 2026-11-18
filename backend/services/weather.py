@@ -4,7 +4,7 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 import httpx
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -111,14 +111,119 @@ def get_current_weather(lat: float, lon: float) -> Dict[str, Any]:
     }
 
 
-def get_forecast(lat: float, lon: float) -> List[Dict[str, Any]]:
+def _compute_24h_summary(list_entries: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
     """
-    Fetch 5-day forecast (3-hour intervals) grouped by date for given coordinates.
+    Compute 24-hour summary metrics from raw 3-hour forecast entries:
+    - rain_next_24h_mm: float (cumulative precipitation for next 24 hours) or None
+    - rain_chance_next_24h: float 0-100 (maximum probability of precipitation across slots) or None
+    - max_temp_next_24h: float (maximum temperature over next 24 hours) or None
+    """
+    if not list_entries:
+        return {
+            "rain_next_24h_mm": None,
+            "rain_chance_next_24h": None,
+            "max_temp_next_24h": None,
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff_24h = now_utc + timedelta(hours=24)
+
+    # Filter entries falling into the next 24 hours (up to 8 3-hour slots)
+    entries_24h = []
+    for entry in list_entries:
+        if not isinstance(entry, dict):
+            continue
+
+        entry_dt = None
+        if entry.get("dt") is not None:
+            try:
+                entry_dt = datetime.fromtimestamp(entry["dt"], timezone.utc)
+            except (ValueError, OSError):
+                pass
+        if entry_dt is None and entry.get("dt_txt"):
+            try:
+                entry_dt = datetime.strptime(str(entry["dt_txt"]).strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except Exception:
+                pass
+
+        if entry_dt is not None:
+            # An entry covers a 3-hour window; include if window overlaps next 24h
+            if (entry_dt + timedelta(hours=3)) > now_utc and entry_dt <= cutoff_24h:
+                entries_24h.append(entry)
+                if len(entries_24h) >= 8:
+                    break
+        else:
+            entries_24h.append(entry)
+            if len(entries_24h) >= 8:
+                break
+
+    # If date filtering yielded nothing but entries exist, fallback to first 8 entries
+    if not entries_24h and list_entries:
+        entries_24h = [e for e in list_entries[:8] if isinstance(e, dict)]
+
+    if not entries_24h:
+        return {
+            "rain_next_24h_mm": None,
+            "rain_chance_next_24h": None,
+            "max_temp_next_24h": None,
+        }
+
+    temp_values: List[float] = []
+    pop_values: List[float] = []
+    rain_values: List[float] = []
+
+    for entry in entries_24h:
+        main = entry.get("main") if isinstance(entry.get("main"), dict) else {}
+        t = main.get("temp_max", main.get("temp"))
+        if t is not None:
+            try:
+                temp_values.append(float(t))
+            except (ValueError, TypeError):
+                pass
+
+        pop = entry.get("pop")
+        if pop is not None:
+            try:
+                pop_values.append(float(pop))
+            except (ValueError, TypeError):
+                pass
+
+        rain_dict = entry.get("rain")
+        if isinstance(rain_dict, dict):
+            r_3h = rain_dict.get("3h", 0.0)
+            if r_3h is not None:
+                try:
+                    rain_values.append(float(r_3h))
+                except (ValueError, TypeError):
+                    rain_values.append(0.0)
+            else:
+                rain_values.append(0.0)
+        else:
+            rain_values.append(0.0)
+
+    max_temp_next_24h = round(max(temp_values), 1) if temp_values else None
+
+    if pop_values:
+        chance = round(max(pop_values) * 100.0, 1)
+        rain_chance_next_24h = max(0.0, min(100.0, chance))
+    else:
+        rain_chance_next_24h = None
+
+    rain_next_24h_mm = round(sum(rain_values), 2) if rain_values else None
+
+    return {
+        "rain_next_24h_mm": rain_next_24h_mm,
+        "rain_chance_next_24h": rain_chance_next_24h,
+        "max_temp_next_24h": max_temp_next_24h,
+    }
+
+
+def get_forecast_data(lat: float, lon: float) -> Tuple[List[Dict[str, Any]], Dict[str, Optional[float]]]:
+    """
+    Fetch 5-day forecast grouped by date AND next 24-hour summary metrics for given coordinates.
 
     Returns:
-        list of up to 5 daily dicts: date, temp_min_c, temp_max_c,
-        avg_humidity_percent, total_rain_mm, max_rain_chance_percent,
-        rain_expected.
+        tuple of (daily_forecast_list, summary_24h_dict)
     """
     api_key = _get_api_key()
     params = {
@@ -144,6 +249,9 @@ def get_forecast(lat: float, lon: float) -> List[Dict[str, Any]]:
         raise WeatherUnavailable("Weather service is not available right now")
 
     list_entries = data.get("list") if isinstance(data.get("list"), list) else []
+
+    # Compute 24-hour summary
+    summary_24h = _compute_24h_summary(list_entries)
 
     # Group 3-hour forecasts by date (YYYY-MM-DD)
     daily_groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -243,6 +351,19 @@ def get_forecast(lat: float, lon: float) -> List[Dict[str, Any]]:
             "rain_expected": rain_expected,
         })
 
+    return forecast_results, summary_24h
+
+
+def get_forecast(lat: float, lon: float) -> List[Dict[str, Any]]:
+    """
+    Fetch 5-day forecast (3-hour intervals) grouped by date for given coordinates.
+
+    Returns:
+        list of up to 5 daily dicts: date, temp_min_c, temp_max_c,
+        avg_humidity_percent, total_rain_mm, max_rain_chance_percent,
+        rain_expected.
+    """
+    forecast_results, _ = get_forecast_data(lat, lon)
     return forecast_results
 
 
@@ -255,26 +376,27 @@ _weather_cache: Dict[Tuple[float, float], Tuple[float, Dict[str, Any]]] = {}
 def fetch_field_weather(db: Session, field: Any) -> Dict[str, Any]:
     """
     Get current weather and 5-day forecast for a field with 10-minute in-memory cache
-    and history persistence to weather_readings on fresh fetches.
+    and history persistence to weather_readings and forecast_snapshots on fresh fetches.
     Raises WeatherUnavailable if the external API call fails on a cache miss.
     """
     cache_key = (round(field.latitude, 2), round(field.longitude, 2))
     now = time.time()
 
+    is_cache_valid = False
     if cache_key in _weather_cache:
         cached_time, cached_data = _weather_cache[cache_key]
         if now - cached_time < CACHE_TTL_SECONDS:
-            return {
-                "current": cached_data["current"],
-                "forecast": cached_data["forecast"],
-            }
+            is_cache_valid = True
+            current = cached_data["current"]
+            forecast = cached_data["forecast"]
+            summary_24h = cached_data.get("summary_24h", {})
 
-    # Cache miss: fetch fresh weather from OpenWeatherMap
-    current = get_current_weather(field.latitude, field.longitude)
-    forecast = get_forecast(field.latitude, field.longitude)
-
-    # Save to in-memory cache
-    _weather_cache[cache_key] = (now, {"current": current, "forecast": forecast})
+    if not is_cache_valid:
+        # Cache miss: fetch fresh weather from OpenWeatherMap
+        current = get_current_weather(field.latitude, field.longitude)
+        forecast, summary_24h = get_forecast_data(field.latitude, field.longitude)
+        # Save to in-memory cache
+        _weather_cache[cache_key] = (now, {"current": current, "forecast": forecast, "summary_24h": summary_24h})
 
     # Save current weather reading to history if not recently recorded (< 10 min)
     try:
@@ -310,6 +432,39 @@ def fetch_field_weather(db: Session, field: Any) -> Dict[str, Any]:
     except Exception as e:
         db.rollback()
         print(f"Notice: Failed to persist weather reading to history: {e}")
+
+    # Save forecast snapshot to history if not recently recorded (< 10 min)
+    try:
+        now_utc = datetime.now(timezone.utc)
+        latest_snapshot = (
+            db.query(models.ForecastSnapshot)
+            .filter(models.ForecastSnapshot.field_id == field.id)
+            .order_by(models.ForecastSnapshot.fetched_at.desc())
+            .first()
+        )
+
+        should_save_snapshot = True
+        if latest_snapshot and latest_snapshot.fetched_at:
+            fetched_at = latest_snapshot.fetched_at
+            if fetched_at.tzinfo is None:
+                fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+            if (now_utc - fetched_at) < timedelta(minutes=10):
+                should_save_snapshot = False
+
+        if should_save_snapshot:
+            snapshot_entry = models.ForecastSnapshot(
+                field_id=field.id,
+                fetched_at=now_utc,
+                rain_next_24h_mm=summary_24h.get("rain_next_24h_mm"),
+                rain_chance_next_24h=summary_24h.get("rain_chance_next_24h"),
+                max_temp_next_24h=summary_24h.get("max_temp_next_24h"),
+                daily_summary=forecast,
+            )
+            db.add(snapshot_entry)
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Notice: Failed to persist forecast snapshot to history: {e}")
 
     return {
         "current": current,

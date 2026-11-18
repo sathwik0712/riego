@@ -1,10 +1,12 @@
 from datetime import datetime, timezone, timedelta
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from database import get_db
 import models
-from schemas import IrrigationLogCreate, IrrigationLogOut, IrrigationLogHistoryOut
+from schemas import IrrigationLogCreate, IrrigationLogOut, IrrigationLogHistoryOut, DetectedIrrigationEvent
 from normalize import to_utc
+from services.irrigation_detection import detect_irrigation_events
 
 # APIRouter for irrigation log endpoints
 router = APIRouter(tags=["Irrigation Log"])
@@ -32,8 +34,11 @@ def create_irrigation_log(log_in: IrrigationLogCreate, db: Session = Depends(get
             )
         rec.status = "done"
 
-    # Normalize start time to UTC (defaults to current time if omitted)
-    started_at = to_utc(log_in.started_at) if log_in.started_at else datetime.now(timezone.utc)
+    # Normalize start time and irrigated time to UTC (defaults to current time if omitted)
+    now_utc = datetime.now(timezone.utc)
+    started_at = to_utc(log_in.started_at) if log_in.started_at else now_utc
+    event_source = log_in.event_source if log_in.event_source else "farmer_tap"
+    irrigated_at = to_utc(log_in.irrigated_at) if log_in.irrigated_at else now_utc
 
     # Instantiate and save the new irrigation log
     new_log = models.IrrigationLog(
@@ -42,6 +47,8 @@ def create_irrigation_log(log_in: IrrigationLogCreate, db: Session = Depends(get
         duration_minutes=log_in.duration_minutes,
         water_liters=log_in.water_liters,
         source=log_in.source if log_in.source else "farmer",
+        event_source=event_source,
+        irrigated_at=irrigated_at,
         recommendation_id=log_in.recommendation_id,
     )
 
@@ -85,3 +92,27 @@ def get_field_irrigation_logs(
         "count": len(logs),
         "logs": logs,
     }
+
+
+# Detect potential irrigation events based on significant soil moisture jumps
+@router.get("/fields/{field_id}/detected-irrigation", response_model=List[DetectedIrrigationEvent])
+@router.get("/fields/{field_id}/detected-irrigation/", response_model=List[DetectedIrrigationEvent], include_in_schema=False)
+def get_detected_irrigation(
+    field_id: int,
+    hours: int = Query(default=168, ge=1, le=720),
+    db: Session = Depends(get_db)
+):
+    """
+    Scan soil moisture readings and return detected irrigation events where moisture
+    jumped by at least 10% within 60 minutes.
+    Does NOT write to irrigation_logs. Returns 404 for an unknown field, empty list if none found.
+    """
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Field not found"
+        )
+
+    return detect_irrigation_events(db, field_id=field_id, hours=hours)
+

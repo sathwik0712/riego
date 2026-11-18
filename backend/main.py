@@ -1,9 +1,11 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from database import engine, SessionLocal, Base
 import models
+from services.collector import collector_loop
 from routers.fields import router as fields_router
 from routers.sensor_readings import router as sensor_readings_router
 from routers.auth import router as auth_router
@@ -54,7 +56,17 @@ async def lifespan(app: FastAPI):
         # Log notice if hypertable already exists or non-critical error
         print(f"Weather hypertable creation notice: {e}")
 
+    # Start background collector task
+    collector_task = asyncio.create_task(collector_loop())
+
     yield
+
+    # Cleanly cancel collector task on shutdown
+    collector_task.cancel()
+    try:
+        await collector_task
+    except asyncio.CancelledError:
+        pass
 
 # Initialize FastAPI application
 app = FastAPI(title="Riego API", lifespan=lifespan)

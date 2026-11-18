@@ -398,5 +398,64 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
   7. Feature engineering.
   8. Train and evaluate Random Forest, Gradient Boosting and LSTM with MLflow.
 
+---
+
+## Session 13: Weeks 3–4 (18 November 2026) — Forecast Snapshots and Hourly Collector
+
+### Backend
+- New table `forecast_snapshots` (rain next 24h, rain chance, max temp, 5-day daily summary as JSON). Saved on each fresh weather fetch, with a 10-minute duplicate check in the database (works after restart). Endpoint `GET /weather/{field_id}/forecast-history`.
+- `services/collector.py`: hourly background collector for all fields (60 min, 2 s pause between fields), started in `main.py` lifespan, cancels cleanly. One failing field never stops the others.
+
+---
+
+## Session 14: Weeks 3–4 (18 November 2026) — Crop-Specific Growth Stages
+
+### Backend
+- `growth.py` now has `CROP_GROWTH_STAGES` for the 8 crops (approximate values, mentor to confirm) and a default for unknown crops. Crop name ignores case and spaces. `FieldOut` passes the crop.
+
+---
+
+## Session 15: Weeks 3–4 (18 November 2026) — Pump Flow Rate Unit, Horsepower and Flow Source
+
+### Backend & Frontend
+- Flow rate unit is litres per hour. New columns `pump_hp` and `pump_flow_source` (typed, estimated_from_hp, default), added with a manual ALTER TABLE. `backend/pump.py` has `HP_TO_FLOW_LPH` and `DEFAULT_FLOW_LPH` 9000 (approximate).
+- Field form Screen 3 has the litres-per-hour unit, horsepower cards and a hint; the Review screen shows the pump line. Tested by hand with 3 fields (ids 9, 10, 11), kept as sample data.
+
+---
+
+## Session 16: Weeks 3–4 (18 November 2026) — Source Column for Manual Readings
+
+### Backend
+- `sensor_readings.source` ("sensor" or "manual"), old rows backfilled. Code uses it, with the "manual-" prefix as fallback for old rows. Source added to both history outputs and to conditions.
+
+---
+
+## Session 17: Weeks 3–4 (18 November 2026) — Irrigation Log Labels and Detection
+
+### Backend
+- `irrigation_logs` got `event_source` (farmer_tap, manual_entry, sensor_detected) and `irrigated_at` (not in the future, at most 7 days old). The older source column is still there; use `event_source`.
+- `services/irrigation_detection.py` finds moisture rises of at least 10 points within 60 minutes. `GET /fields/{field_id}/detected-irrigation` only returns the list; it does not write logs.
+
+---
+
+## Session 18: Weeks 3–4 (18 November 2026) — Fake Data Generator
+
+### ML Engine
+- `backend/ml/generate_data.py` writes a CSV that matches `DATASET.md` (27 columns). It uses a physics-based moisture model, weather, noise, sensor drift, missing readings and outages, and noisy labels. Fixed seed gives identical files. Output is git-ignored (`backend/ml/data/`).
+- Bug fixed: `growth_stage` was shifted one stage because `growth.py` uses today's date. Now 0 of 115,200 rows disagree with `growth.py`.
+- Default run (40 fields, 120 days): 115,200 rows, 3.78% irrigate_now = 1, 5.89% missing sensor moisture, average duration 42.4 minutes when irrigating.
+
+### Known Gaps
+- Only about 3.8% of rows are `irrigate_now = 1`; handle the imbalance when training.
+- About 7.5% of rows are "Not sown yet"; filter or handle in feature engineering.
+- Rain-fed fields can get a pump flow rate in the fake data.
+- The growth-stage fix is a workaround; `get_growth_stage` could take an "as of" date.
+- The hourly collector has no automatic deletion of old data.
+
+### What's Next
+1. Feature engineering
+2. Train and evaluate Random Forest, Gradient Boosting and LSTM, tracked with MLflow
+3. Schedule optimizer, FastAPI serving of recommendations
+
 
 
