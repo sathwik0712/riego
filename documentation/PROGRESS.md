@@ -337,6 +337,66 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 ### What's Next
 - Task 6, connect the frontend to the backend, add the manual reading entry screen, and add the recommendations and irrigation-log tables just before it.
 
+---
+
+## Session 11: Week 2 (16 November 2026) — Task 6: Connect Frontend to Backend, Manual Reading Entry, Recommendations and Irrigation Log
+
+### Backend
+- New tables `recommendations` and `irrigation_log`, with endpoints `POST /recommendations`, `GET /fields/{field_id}/recommendations`, `POST /irrigation-log`, `GET /fields/{field_id}/irrigation-log`. A log entry linked to a recommendation marks it done.
+- `POST /fields/{field_id}/manual-reading` saves a typed moisture value into `sensor_readings` as device `manual-<field_id>` (no table change). Manual readings count in latest reading, history and conditions, and conditions now has a source (sensor or manual).
+- CORS allows only `http://localhost:3000` and `http://127.0.0.1:3000`.
+
+### Frontend
+- `lib/api.ts` connection layer with 10 second timeout and plain farmer-friendly errors; `ErrorNotice` and `LoadingCard` components.
+- Fields page and the field registration form use the real backend (duplicate device ID shows a plain message).
+- Dashboard uses real fields, weather strip, summary tiles and 7-day trends from sensor history; shows last saved data from the browser when the backend cannot be reached (NFR-3, NFR-5).
+- Manual reading pop-up (bottom sheet on phone, centred on desktop) opened from each field card.
+- Plan page Done button saves to the irrigation log and is remembered after reload.
+- Field card fixes: device "null" now shows a dash, last reading shows the real age.
+
+### Not Done Yet
+- Login and signup still use the browser-only fake OTP and are not connected to the backend `/auth` endpoints.
+- New fields use the fixed farmer `farmer_001` and a placeholder location (Use my current location is not real GPS).
+- Advice card, schedule cards, recent alerts and the Active alerts tile are sample data until the ML engine and alert engine exist.
+- No recommendations are created automatically yet.
+- Weather history is saved only when someone opens a weather screen; no background job.
+
+### What's Next
+- Task 7, ML data set structure and fake data generator.
+
+---
+
+## Session 12: Weeks 3–4 (18 November 2026) — Task 7 (Part 1): ML Dataset Structure
+
+### ML Engine & Dataset Specification
+- `backend/ml/DATASET.md`: the dataset specification. One row is one field at one hour. 27 columns grouped by source (field registration, crop stage, soil moisture from sensor or manual reading, current weather, forecast, irrigation history). Each column has a type, unit, allowed range, source and meaning.
+- Targets: `irrigate_now` (0 or 1) and `irrigation_duration_minutes`. Volume in litres can be worked out from duration and pump flow rate.
+- Rules for missing values, data quality, and a warning about data leakage (only use information known at decision time).
+- `backend/ml/example_rows.csv`: 8 made-up example rows, checked against the spec (column names, ranges and target consistency).
+
+### Known Gaps Found
+- The 5-day forecast is only kept in memory and is not saved, so past forecasts are not available for training.
+- Growth stages are the same for all crops.
+- Pump flow rate has no unit in the database (assumed litres per hour).
+- Manual readings are told apart only by the device ID prefix `manual-`.
+- Irrigation logs are not always linked to a recommendation, and farmers tap Done by hand, so labels can be noisy.
+
+### Decision
+- The mentor accepted synthetic data, so the training data will come from a fake data generator, not from public datasets.
+
+### Not Done Yet
+- The fake data generator (part 2 of Task 7).
+
+### What's Next
+- Weeks 3–4 list:
+  1. Forecast snapshots and hourly collector.
+  2. Crop-specific growth stages.
+  3. Pump flow rate unit and horsepower on the form.
+  4. Proper source column for manual readings.
+  5. Noisy irrigation logs and labels.
+  6. Fake data generator.
+  7. Feature engineering.
+  8. Train and evaluate Random Forest, Gradient Boosting and LSTM with MLflow.
 
 
 
