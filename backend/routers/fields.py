@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -8,6 +8,7 @@ from schemas import FieldCreate, FieldOut, ManualReadingCreate, ManualReadingOut
 from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
 from services.conditions import get_field_conditions
 from pump import resolve_pump_flow
+from ml.predict import predict_for_field
 
 # APIRouter for field-related endpoints
 router = APIRouter(prefix="/fields", tags=["Fields"])
@@ -168,4 +169,25 @@ def create_manual_reading(
         "time": new_reading.time,
         "source": "manual",
     }
+
+
+# GET /fields/{field_id}/prediction — ML irrigation prediction for one field
+@router.get("/{field_id}/prediction")
+def get_field_prediction(field_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Return an ML-based irrigation prediction for a single field.
+
+    - 404 if the field does not exist.
+    - Does not write to the database.
+    - status "ok": full prediction result.
+    - status "not_enough_data": no moisture reading or field not sown.
+    - status "error": model files missing or other failure.
+    """
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Field with ID {field_id} not found.",
+        )
+    return predict_for_field(db, field_id)
 
