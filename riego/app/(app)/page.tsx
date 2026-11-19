@@ -3,21 +3,37 @@
 // Home Screen (Farmer Dashboard)
 // Loads real fields, conditions, weather, and sensor history from the FastAPI backend.
 // Caches successful loads in localStorage so the farmer sees something even offline.
-// Advice card, schedule preview, and recent alerts use sample data until ML/alert engines are built.
+// Advice card shows a per-field slider using real plan + field recommendation data.
 
 import { useEffect, useState, useCallback } from "react";
 import {
-  getAdvice,
   getFields,
   getFieldConditions,
+  getFieldRecommendation,
   getSensorHistory,
   getRecentAlerts,
-  getTodaySchedule,
+  getTodayPlan,
 } from "@/lib/api";
 import { STRINGS } from "@/lib/strings";
-import { BackendField, FieldConditions, MoistureDataPoint, Advice, Alert, ScheduleItem } from "@/lib/types";
+import {
+  BackendField,
+  FieldConditions,
+  MoistureDataPoint,
+  Alert,
+  ScheduleItem,
+  PlanSlot,
+  AdviceItem,
+} from "@/lib/types";
 import { calculateDailyAverages } from "@/lib/fieldStatus";
-import { saveDashboardCache, loadDashboardCache } from "@/lib/cache";
+import {
+  saveDashboardCache,
+  loadDashboardCache,
+  savePlanCache,
+  loadPlanCache,
+  getSessionDoneAt,
+  pruneSessionDoneCache,
+} from "@/lib/cache";
+import { formatTimeIST, formatLastUpdatedIST } from "@/lib/dateUtils";
 
 import AdviceCard from "@/components/AdviceCard";
 import WeatherStrip from "@/components/WeatherStrip";
@@ -28,36 +44,158 @@ import SchedulePreview from "@/components/SchedulePreview";
 import RecentAlerts from "@/components/RecentAlerts";
 import LoadingCard from "@/components/LoadingCard";
 import ErrorNotice from "@/components/ErrorNotice";
+import ManualReadingModal from "@/components/ManualReadingModal";
 import { ClockIcon } from "@/components/icons";
+
+// Field type for the manual reading modal
+type ReadingField = {
+  id: number;
+  name?: string | null;
+  nickname?: string | null;
+  crop: string;
+};
+
+// ── Build per-field advice items from plan slots + per-field recommendation data ──
+// Order: a (water/not done) first, then c (needs_reading), then b (ok), then d (done).
+// Within each group, sort by earliest slot time.
+function buildAdviceItems(
+  fields: BackendField[],
+  activeSlots: PlanSlot[],
+  recMap: Record<number, { status: string; advice_text?: string }>,
+  isSessionDoneFn: (fieldId: number, slotStart: string) => boolean
+): AdviceItem[] {
+  const groups: {
+    water: AdviceItem[];
+    needs_reading: AdviceItem[];
+    ok: AdviceItem[];
+    done: AdviceItem[];
+  } = { water: [], needs_reading: [], ok: [], done: [] };
+
+  for (const field of fields) {
+    const fieldName =
+      field.nickname?.trim() || field.name?.trim() || `Field ${field.id}`;
+
+    // Slots for this field, sorted chronologically
+    const fieldSlots = activeSlots
+      .filter((s) => s.field_id === field.id)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+    if (fieldSlots.length > 0) {
+      // Find the first not-done slot
+      const pendingSlots = fieldSlots.filter(
+        (s) => !isSessionDoneFn(field.id, s.start)
+      );
+
+      if (pendingSlots.length > 0) {
+        const earliest = pendingSlots[0];
+        const timeStr = formatTimeIST(earliest.start);
+        groups.water.push({
+          fieldId: field.id,
+          fieldName,
+          kind: "water",
+          sentence: `Water ${fieldName} at ${timeStr} for ${earliest.duration_minutes} minutes`,
+          slotStart: earliest.start,
+          moreCount: pendingSlots.length > 1 ? pendingSlots.length - 1 : 0,
+        });
+      } else {
+        // All sessions for this field are done
+        groups.done.push({
+          fieldId: field.id,
+          fieldName,
+          kind: "done",
+          sentence: "Done for today",
+          slotStart: fieldSlots[0].start,
+        });
+      }
+    } else {
+      // No active slots → check recommendation
+      const rec = recMap[field.id];
+      if (
+        rec &&
+        (rec.status === "stale_reading" || rec.status === "not_enough_data")
+      ) {
+        groups.needs_reading.push({
+          fieldId: field.id,
+          fieldName,
+          kind: "needs_reading",
+          sentence: `We need a fresh soil reading for ${fieldName}`,
+          readingField: {
+            id: field.id,
+            name: field.name,
+            nickname: field.nickname,
+            crop: field.crop,
+          },
+        });
+      } else {
+        const reason =
+          rec?.advice_text ||
+          "No watering needed today, soil moisture is adequate";
+        groups.ok.push({
+          fieldId: field.id,
+          fieldName,
+          kind: "ok",
+          sentence: reason,
+        });
+      }
+    }
+  }
+
+  // Sort each group by slotStart within water/done
+  const bySlot = (a: AdviceItem, b: AdviceItem) => {
+    if (!a.slotStart && !b.slotStart) return 0;
+    if (!a.slotStart) return 1;
+    if (!b.slotStart) return -1;
+    return new Date(a.slotStart).getTime() - new Date(b.slotStart).getTime();
+  };
+  groups.water.sort(bySlot);
+  groups.done.sort(bySlot);
+
+  return [
+    ...groups.water,
+    ...groups.needs_reading,
+    ...groups.ok,
+    ...groups.done,
+  ];
+}
 
 export default function HomePage() {
   // ── State ──
   const [fields, setFields] = useState<BackendField[]>([]);
   const [conditionsByFieldId, setConditionsByFieldId] = useState<Record<number, FieldConditions>>({});
   const [conditionsErrors, setConditionsErrors] = useState<Record<number, boolean>>({});
-  // Per-field trend data: daily averages for sparklines and the chart
   const [trendsByFieldId, setTrendsByFieldId] = useState<Record<number, MoistureDataPoint[]>>({});
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usingCache, setUsingCache] = useState(false);
+  const [cacheLabel, setCacheLabel] = useState<string | undefined>(undefined);
 
-  // Sample data for sections not yet connected to real backends
-  const [advice, setAdvice] = useState<Advice>({ id: "", actionText: "", fieldId: "" });
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  // Per-field advice slider data
+  const [adviceItems, setAdviceItems] = useState<AdviceItem[]>([]);
+
+  // Desktop schedule preview
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+
+  // Manual reading modal
+  const [selectedFieldForReading, setSelectedFieldForReading] = useState<ReadingField | null>(null);
 
   // ── Data loading ──
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     setError(null);
     setUsingCache(false);
+    setCacheLabel(undefined);
+
+    // Prune stale done records on each load
+    if (typeof window !== "undefined") pruneSessionDoneCache();
 
     try {
-      // 1. Fetch fields from the backend
+      // 1. Fields
       const fieldsData = await getFields();
 
-      // 2. Fetch conditions for each field in parallel (one failure does not break the others)
+      // 2. Conditions
       const conditionsResults = await Promise.allSettled(
         fieldsData.map((f) => getFieldConditions(f.id))
       );
@@ -65,14 +203,11 @@ export default function HomePage() {
       const errMap: Record<number, boolean> = {};
       fieldsData.forEach((f, i) => {
         const r = conditionsResults[i];
-        if (r.status === "fulfilled") {
-          condMap[f.id] = r.value;
-        } else {
-          errMap[f.id] = true;
-        }
+        if (r.status === "fulfilled") condMap[f.id] = r.value;
+        else errMap[f.id] = true;
       });
 
-      // 3. Fetch 7-day sensor history for each field in parallel
+      // 3. Sensor history
       const historyResults = await Promise.allSettled(
         fieldsData.map((f) => getSensorHistory(f.id, 168))
       );
@@ -86,47 +221,126 @@ export default function HomePage() {
         }
       });
 
-      // 4. Load sample data for sections not yet connected
-      const [adviceData, alertsData, scheduleData] = await Promise.all([
-        getAdvice(),
-        getRecentAlerts(),
-        getTodaySchedule(),
-      ]);
+      // 4. Today's plan
+      let planSlots: PlanSlot[] = [];
+      let planFromCache = false;
+      try {
+        planSlots = await getTodayPlan();
+        savePlanCache(planSlots);
+      } catch {
+        const cachedPlan = loadPlanCache();
+        planSlots = cachedPlan?.slots || [];
+        planFromCache = true;
+      }
+
+      const activeSlots = planSlots.filter((s) => s.duration_minutes > 0);
+      activeSlots.sort(
+        (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+      );
+
+      // 5. Per-field recommendations (only for fields with no active slots)
+      const fieldsWithoutSlots = fieldsData.filter(
+        (f) => !activeSlots.some((s) => s.field_id === f.id)
+      );
+      const recResults = await Promise.allSettled(
+        fieldsWithoutSlots.map((f) => getFieldRecommendation(f.id))
+      );
+      const recMap: Record<number, { status: string; advice_text?: string }> = {};
+      fieldsWithoutSlots.forEach((f, i) => {
+        const r = recResults[i];
+        if (r.status === "fulfilled") {
+          recMap[f.id] = {
+            status: r.value.status,
+            advice_text: r.value.advice_text,
+          };
+        }
+      });
+
+      // 6. Build per-field advice items using session-keyed done state
+      const items = buildAdviceItems(
+        fieldsData,
+        activeSlots,
+        recMap,
+        (fId, slotStart) => Boolean(getSessionDoneAt(fId, slotStart))
+      );
+      setAdviceItems(items);
+
+      // 7. Desktop schedule preview — first 3 active slots, done state from session cache
+      const previewItems: ScheduleItem[] = activeSlots.slice(0, 3).map((slot, idx) => ({
+        id: `plan-slot-${slot.field_id}-${slot.start}-${idx}`,
+        fieldId: slot.field_id,
+        fieldName: slot.field_nickname?.trim() || `Field ${slot.field_id}`,
+        time: formatTimeIST(slot.start),
+        durationMinutes: slot.duration_minutes,
+        done: Boolean(getSessionDoneAt(slot.field_id, slot.start)),
+        doneAt: getSessionDoneAt(slot.field_id, slot.start) ?? undefined,
+      }));
+
+      // 8. Alerts
+      const alertsData = await getRecentAlerts();
 
       setFields(fieldsData);
       setConditionsByFieldId(condMap);
       setConditionsErrors(errMap);
       setTrendsByFieldId(trendMap);
-      setAdvice(adviceData);
+      setSchedule(previewItems);
       setAlerts(alertsData);
-      setSchedule(scheduleData);
 
-      // 5. Save to localStorage for offline access
+      if (planFromCache) setUsingCache(true);
+
       saveDashboardCache({
         savedAt: new Date().toISOString(),
         fields: fieldsData,
         conditionsByFieldId: condMap,
       });
     } catch (err: any) {
-      // Backend unreachable — try to load from cache
+      // Fully offline — try cache
       const cached = loadDashboardCache();
+      const cachedPlan = loadPlanCache();
+
       if (cached) {
         setFields(cached.fields);
         setConditionsByFieldId(cached.conditionsByFieldId);
         setConditionsErrors({});
-        setTrendsByFieldId({}); // No trend data in cache
+        setTrendsByFieldId({});
         setUsingCache(true);
-        // Still load sample data for non-backend sections
-        const [adviceData, alertsData, scheduleData] = await Promise.all([
-          getAdvice(),
-          getRecentAlerts(),
-          getTodaySchedule(),
-        ]);
-        setAdvice(adviceData);
-        setAlerts(alertsData);
-        setSchedule(scheduleData);
+
+        if (cachedPlan) {
+          setCacheLabel(formatLastUpdatedIST(cachedPlan.savedAt));
+          const activeSlots = (cachedPlan.slots || []).filter(
+            (s) => s.duration_minutes > 0
+          );
+          activeSlots.sort(
+            (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+          );
+
+          const items = buildAdviceItems(
+            cached.fields,
+            activeSlots,
+            {},
+            (fId, slotStart) => Boolean(getSessionDoneAt(fId, slotStart))
+          );
+          setAdviceItems(items);
+
+          const previewItems: ScheduleItem[] = activeSlots
+            .slice(0, 3)
+            .map((slot, idx) => ({
+              id: `plan-slot-${slot.field_id}-${slot.start}-${idx}`,
+              fieldId: slot.field_id,
+              fieldName: slot.field_nickname?.trim() || `Field ${slot.field_id}`,
+              time: formatTimeIST(slot.start),
+              durationMinutes: slot.duration_minutes,
+              done: Boolean(getSessionDoneAt(slot.field_id, slot.start)),
+              doneAt: getSessionDoneAt(slot.field_id, slot.start) ?? undefined,
+            }));
+          setSchedule(previewItems);
+        }
+
+        setAlerts(await getRecentAlerts());
       } else {
-        setError(err?.message || "Could not reach the server. Check your internet and try again.");
+        setError(
+          err?.message || "Could not reach the server. Check your internet and try again."
+        );
       }
     } finally {
       setLoading(false);
@@ -138,17 +352,21 @@ export default function HomePage() {
   }, [loadDashboard]);
 
   // ── Weather from the first field's conditions ──
-  const firstFieldConditions = fields.length > 0 ? conditionsByFieldId[fields[0].id] : null;
+  const firstFieldConditions =
+    fields.length > 0 ? conditionsByFieldId[fields[0].id] : null;
   const weatherAvailable = firstFieldConditions?.weather?.available ?? false;
   const weatherCurrent = firstFieldConditions?.weather?.current ?? null;
-  const rainExpectedSoon = firstFieldConditions?.weather?.rain_expected_soon ?? null;
-  const rainTotalMm = firstFieldConditions?.weather?.rain_total_mm_next_2_days ?? null;
+  const rainExpectedSoon =
+    firstFieldConditions?.weather?.rain_expected_soon ?? null;
+  const rainTotalMm =
+    firstFieldConditions?.weather?.rain_total_mm_next_2_days ?? null;
 
-  // ── Compute a single sparkline trend for the summary tile (average all fields per day) ──
-  const allDailyArrays = Object.values(trendsByFieldId).filter((arr) => arr.length >= 2);
+  // ── Summary sparkline (average across fields) ──
+  const allDailyArrays = Object.values(trendsByFieldId).filter(
+    (arr) => arr.length >= 2
+  );
   let summaryMoistureTrend: number[] | undefined;
   if (allDailyArrays.length > 0) {
-    // Use the longest trend's day count; average across fields per day index
     const maxDays = Math.max(...allDailyArrays.map((a) => a.length));
     summaryMoistureTrend = [];
     for (let d = 0; d < maxDays; d++) {
@@ -156,22 +374,20 @@ export default function HomePage() {
         .map((a) => a[d]?.moisture)
         .filter((v): v is number => v !== undefined);
       summaryMoistureTrend.push(
-        values.length > 0 ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0
+        values.length > 0
+          ? Math.round(values.reduce((s, v) => s + v, 0) / values.length)
+          : 0
       );
     }
   }
 
-  // ── Build MoistureChart trend data ──
-  const fieldTrends = fields
-    .map((f) => {
-      const trend = trendsByFieldId[f.id] ?? [];
-      return {
-        fieldId: f.id,
-        name: f.nickname?.trim() || `Field ${f.id}`,
-        crop: f.crop,
-        dailyAverages: trend,
-      };
-    });
+  // ── MoistureChart data ──
+  const fieldTrends = fields.map((f) => ({
+    fieldId: f.id,
+    name: f.nickname?.trim() || `Field ${f.id}`,
+    crop: f.crop,
+    dailyAverages: trendsByFieldId[f.id] ?? [],
+  }));
 
   // ── Loading state ──
   if (loading) {
@@ -191,7 +407,7 @@ export default function HomePage() {
     );
   }
 
-  // ── Error state (no cache available) ──
+  // ── Error state (no cache) ──
   if (error) {
     return (
       <div className="flex flex-col gap-6">
@@ -217,31 +433,24 @@ export default function HomePage() {
         </div>
       )}
 
-      {/*
-        0. Summary Tiles Row — desktop only (hidden on phone & tablet)
-        4 compact tiles computed from real data
-      */}
+      {/* Summary Tiles — desktop only */}
       <SummaryTiles
         fields={fields}
         conditionsByFieldId={conditionsByFieldId}
         moistureTrend={summaryMoistureTrend}
       />
 
-      {/*
-        1 & 2. Advice & Weather Row
-        - Phone & Tablet: Stacked full-width cards with gap-4
-        - Desktop (>=1024px): Side-by-side in one row (Advice 7 cols, Weather 5 cols)
-      */}
+      {/* Advice + Weather Row */}
       <section
         aria-label="Daily irrigation recommendation and weather"
         className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch"
       >
         <div className="lg:col-span-7">
-          {/* Sample advice — connects to ML engine in a later step */}
           <AdviceCard
-            actionText={advice.actionText}
-            bestTime={advice.bestTime}
-            waterAmount={advice.waterAmount}
+            items={adviceItems}
+            usingCache={usingCache}
+            lastUpdatedLabel={cacheLabel}
+            onOpenManualReading={(f) => setSelectedFieldForReading(f)}
           />
         </div>
         <div className="lg:col-span-5">
@@ -254,12 +463,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/*
-        3. Registered Field Cards Section
-        - Phone: 1-column list with gap-4
-        - Tablet (640px-1023px): 2-column grid with gap-4; odd last card spans 2 cols
-        - Desktop (>=1024px): 3-column grid with gap-4
-      */}
+      {/* Field Cards */}
       <section aria-label="Field moisture overview" className="flex flex-col gap-4">
         <div className="flex items-center justify-between px-0.5">
           <h2 className="text-xl font-semibold text-[#1B2D21]">
@@ -287,11 +491,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/*
-        4. Bottom Analytics & Schedule Row — desktop only (hidden on phone & tablet)
-        - Layout: lg:grid-cols-3 gap-4 items-stretch
-        - Chart takes 2 columns, right column holds SchedulePreview and RecentAlerts stacked with gap-4
-      */}
+      {/* Analytics + Schedule — desktop only */}
       <section
         aria-label="Moisture analytics and schedule"
         className="hidden lg:grid lg:grid-cols-3 gap-4 items-stretch"
@@ -303,12 +503,22 @@ export default function HomePage() {
           />
         </div>
         <div className="lg:col-span-1 flex flex-col gap-4">
-          {/* Sample schedule — connects to irrigation planner in a later step */}
           <SchedulePreview schedule={schedule} />
-          {/* Sample alerts — connects to alert engine in a later step */}
           <RecentAlerts alerts={alerts} />
         </div>
       </section>
+
+      {/* Manual reading modal */}
+      {selectedFieldForReading && (
+        <ManualReadingModal
+          field={selectedFieldForReading}
+          onClose={() => setSelectedFieldForReading(null)}
+          onSaved={() => {
+            setSelectedFieldForReading(null);
+            loadDashboard();
+          }}
+        />
+      )}
     </div>
   );
 }

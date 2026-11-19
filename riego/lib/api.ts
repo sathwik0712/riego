@@ -15,9 +15,11 @@ import {
   FarmerProfile,
   FieldConditions,
   FieldCreateData,
+  FieldRecommendation,
   IrrigationLogEntry,
   IrrigationLogResponse,
   ManualReadingResponse,
+  PlanSlot,
   ScheduleItem,
   SensorHistoryResponse,
 } from "./types";
@@ -244,6 +246,16 @@ export async function getIrrigationLog(
   days = 1
 ): Promise<IrrigationLogResponse> {
   return apiGet<IrrigationLogResponse>(`/fields/${fieldId}/irrigation-log?days=${days}`);
+}
+
+// Fetch the farmer's time-slotted irrigation plan from GET /plan/today
+export async function getTodayPlan(farmerId = "farmer_001"): Promise<PlanSlot[]> {
+  return apiGet<PlanSlot[]>(`/plan/today?farmer_id=${encodeURIComponent(farmerId)}`);
+}
+
+// Fetch ML recommendation and schedule for a single field
+export async function getFieldRecommendation(fieldId: number): Promise<FieldRecommendation> {
+  return apiGet<FieldRecommendation>(`/fields/${fieldId}/recommendation`);
 }
 
 export async function getTodaySchedule(): Promise<ScheduleItem[]> {

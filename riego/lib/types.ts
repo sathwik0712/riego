@@ -278,3 +278,55 @@ export interface IrrigationLogResponse {
   logs: IrrigationLogEntry[];
 }
 
+// -------------------------------------------------------------
+// Real ML recommendations and planner schemas
+// -------------------------------------------------------------
+
+// Advice item for one field — used by the AdviceCard slider
+export type AdviceItemKind = "water" | "done" | "needs_reading" | "ok";
+export interface AdviceItem {
+  fieldId: number;
+  fieldName: string;
+  kind: AdviceItemKind;
+  sentence: string;
+  /** Earliest upcoming slot start (ISO) — used for ordering, type "water" only */
+  slotStart?: string;
+  /** Number of additional slots beyond the first */
+  moreCount?: number;
+  /** Field needed for manual reading button */
+  readingField?: {
+    id: number;
+    name?: string | null;
+    nickname?: string | null;
+    crop: string;
+  };
+}
+
+// Time-slotted irrigation session returned by GET /plan/today
+export interface PlanSlot {
+  start: string;            // ISO timestamp in IST e.g. "2026-11-19T18:00:00+05:30"
+  duration_minutes: number; // Scheduled duration in minutes (0 if skipped)
+  reason: string;           // Farmer-friendly plain sentence explaining the slot
+  field_id: number;
+  field_nickname: string;
+}
+
+// Recommendation snapshot from GET /fields/{field_id}/recommendation
+export interface FieldRecommendation {
+  status: "ok" | "stale_reading" | "not_enough_data" | "error" | string;
+  field_id: number;
+  field_nickname?: string | null;
+  should_irrigate?: boolean;
+  probability?: number;
+  threshold?: number;
+  duration_minutes?: number;
+  latest_moisture_pct?: number | null;
+  moisture_source?: string | null;
+  reading_age_hours?: number;
+  message?: string;
+  notes?: string[];
+  action?: "water" | "wait" | string;
+  advice_text?: string;
+  slots?: PlanSlot[];
+}
+

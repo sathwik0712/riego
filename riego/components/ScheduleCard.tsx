@@ -84,7 +84,9 @@ export default function ScheduleCard({
         <p className="text-xs sm:text-sm text-[#5F6E62]">
           {matchedField
             ? `Plot #${matchedField.id} · ${matchedField.irrigation_method || "Irrigation"}`
-            : "Sample field schedule"}
+            : item.fieldId
+            ? `Plot #${item.fieldId}`
+            : "Scheduled irrigation"}
         </p>
       </div>
 
