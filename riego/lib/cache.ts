@@ -129,3 +129,18 @@ export function getSessionDoneAt(fieldId: number, slotStart: string): string | n
   const store = loadSessionDoneStore();
   return store[sessionDoneKey(fieldId, slotStart)] ?? null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full cache wipe — call on logout or on login to avoid cross-farmer bleed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Remove all farmer-specific cached data from localStorage. */
+export function clearAllFarmerCaches(): void {
+  try {
+    localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem(PLAN_CACHE_KEY);
+    localStorage.removeItem(SESSION_DONE_KEY);
+  } catch {
+    // quota or unavailable — ignore silently
+  }
+}

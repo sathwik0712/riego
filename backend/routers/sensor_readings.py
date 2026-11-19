@@ -7,11 +7,12 @@ from database import get_db
 import models
 from schemas import SensorReadingCreate, SensorReadingOut
 from normalize import raw_to_moisture_percent, to_utc
+from routers.auth import get_current_farmer
 
 # APIRouter for sensor readings
 router = APIRouter(prefix="/sensor-readings", tags=["Sensor"])
 
-# Record a new sensor reading
+# Record a new sensor reading (unprotected - hardware device ingest)
 @router.post("", response_model=SensorReadingOut, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=SensorReadingOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_sensor_reading(reading_in: SensorReadingCreate, db: Session = Depends(get_db)):
@@ -68,19 +69,20 @@ def create_sensor_reading(reading_in: SensorReadingCreate, db: Session = Depends
 
     return new_reading
 
-# Retrieve historical sensor readings for a field over the last N hours, oldest first
+# Retrieve historical sensor readings for a field over the last N hours, oldest first (protected)
 @router.get("/{field_id}/history")
 def get_field_sensor_history(
     field_id: int,
     hours: int = Query(default=24, ge=1, le=720),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
     """
     Get saved historical sensor readings for a field over the last N hours (oldest first).
     """
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -116,7 +118,7 @@ def get_field_sensor_history(
         "readings": items,
     }
 
-# Retrieve the latest 20 readings for a device, ordered newest first
+# Retrieve the latest 20 readings for a device, ordered newest first (unprotected - diagnostic / hardware check)
 @router.get("/{device_id}", response_model=List[SensorReadingOut])
 def get_sensor_readings(device_id: str, db: Session = Depends(get_db)):
     readings = (

@@ -1,7 +1,7 @@
 "use client";
 
 // Plan Page: Real Irrigation Timetable & Records
-// Loads real time-slotted irrigation plans from GET /plan/today?farmer_id=farmer_001.
+// Loads real time-slotted irrigation plans from GET /plan/today (farmer from token).
 // Groups active slots (duration > 0) by Today and Tomorrow in IST.
 // Done state is per-session, keyed by field_id + slot start time, stored in localStorage.
 // Saves last good plan in browser storage for offline resilience (NFR-3).

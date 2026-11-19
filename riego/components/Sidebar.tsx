@@ -7,7 +7,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Logo from "./Logo";
 import { LogoutIcon } from "./icons";
-import { endSession } from "@/lib/session";
+import { clearSession } from "@/lib/auth";
+import { clearAllFarmerCaches } from "@/lib/cache";
+import { logoutFromServer } from "@/lib/api";
 import { STRINGS } from "../lib/strings";
 
 interface SidebarProps {
@@ -146,8 +148,11 @@ export default function Sidebar({
         <button
           type="button"
           onClick={() => {
-            endSession();
-            router.push("/welcome");
+            logoutFromServer().finally(() => {
+              clearSession();
+              clearAllFarmerCaches();
+              router.push("/welcome");
+            });
           }}
           className="min-h-[56px] w-full px-4 rounded-2xl border border-[#D1CAAD] bg-[#FAF7EE] hover:bg-[#EFEAD8] active:scale-95 text-[#1B2D21] font-semibold text-sm flex items-center gap-3 transition-all cursor-pointer shadow-xs"
         >

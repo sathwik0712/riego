@@ -1,22 +1,30 @@
 "use client";
 
 // Login flow with two sequential screens:
-// Screen 1: Enter phone number
-// Screen 2: Enter OTP (6-digit input, demo code 123456, resend timer)
+// Screen 1: Enter phone number → POST /auth/request-otp
+// Screen 2: Enter OTP → POST /auth/verify-otp → save session → Home
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Logo from "@/components/Logo";
 import { AlertIcon } from "@/components/icons";
 import OtpInput from "@/components/OtpInput";
-import { findFarmer, startSession, FarmerSession } from "@/lib/session";
-
-// Fake constant for demo mode
-const FAKE_OTP = "123456";
+import { requestOtp, verifyOtp, ApiError } from "@/lib/api";
+import { saveSession, clearSession } from "@/lib/auth";
+import { clearAllFarmerCaches } from "@/lib/cache";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#FAF7EE]" />}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Screen 1 = Phone number, Screen 2 = OTP
   const [step, setStep] = useState<1 | 2>(1);
@@ -25,23 +33,25 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [phoneNotFound, setPhoneNotFound] = useState(false);
-  const [foundFarmer, setFoundFarmer] = useState<FarmerSession | null>(null);
 
-  // OTP state, error, countdown and feedback
+  // OTP state, error, loading, countdown and feedback
   const [otp, setOtp] = useState("");
   const [otpError, setOtpError] = useState("");
   const [resendTimer, setResendTimer] = useState(30);
   const [resendFeedback, setResendFeedback] = useState("");
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+
+  // Show a banner if redirected here because of an expired token
+  const sessionReason = searchParams?.get("reason");
 
   // Resend countdown timer for Screen 2
   useEffect(() => {
     if (step !== 2) return;
     if (resendTimer <= 0) return;
-
     const interval = setInterval(() => {
       setResendTimer((prev) => prev - 1);
     }, 1000);
-
     return () => clearInterval(interval);
   }, [step, resendTimer]);
 
@@ -57,60 +67,102 @@ export default function LoginPage() {
   };
 
   // Handler for Screen 1 submission (Send OTP)
-  const handleSendOtp = (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validatePhone()) return;
-
-    // Check if farmer account exists in session storage or built-in demo
-    const farmer = findFarmer(phone);
-    if (!farmer) {
-      setPhoneNotFound(true);
-      setPhoneError("No account found for this number. Sign up first.");
-      return;
-    }
-
+    setSending(true);
+    setPhoneError("");
     setPhoneNotFound(false);
-    setFoundFarmer(farmer);
 
-    // Future backend integration:
-    // Call POST /auth/request-otp with { phone }
-
-    setStep(2);
-    setResendTimer(30);
-    setOtp("");
-    setOtpError("");
+    try {
+      await requestOtp(phone);
+      setStep(2);
+      setResendTimer(30);
+      setOtp("");
+      setOtpError("");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 404) {
+          setPhoneNotFound(true);
+          setPhoneError("No account found for this number. Sign up first.");
+        } else if (err.status === 0) {
+          setPhoneError("Could not reach the server. Check your internet and try again.");
+        } else {
+          setPhoneError(err.message || "Something went wrong. Please try again.");
+        }
+      } else {
+        setPhoneError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setSending(false);
+    }
   };
 
   // Handler for Screen 2 submission (Log in)
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (otp.length !== 6) return;
+    setVerifying(true);
+    setOtpError("");
 
-    // Future backend integration:
-    // Call POST /auth/verify-otp with { phone, otp }
-    if (otp === FAKE_OTP) {
-      setOtpError("");
-      if (foundFarmer) {
-        startSession(foundFarmer);
+    try {
+      const res = await verifyOtp(phone, otp);
+      // Clear any previous farmer's cached data before saving new session
+      clearAllFarmerCaches();
+      saveSession(res.token, {
+        farmer_id: res.farmer.farmer_id,
+        name: res.farmer.name,
+        phone: res.farmer.phone,
+        village: res.farmer.village,
+        preferred_language: res.farmer.preferred_language,
+      });
+      router.replace("/");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 400) {
+          // Wrong code or expired OTP
+          const msg = err.message.toLowerCase();
+          if (msg.includes("incorrect") || msg.includes("wrong") || msg.includes("otp")) {
+            setOtpError("That code is not correct. Try again.");
+          } else if (msg.includes("expired")) {
+            setOtpError("That code has expired. Request a new one.");
+          } else {
+            setOtpError(err.message);
+          }
+        } else if (err.status === 0) {
+          setOtpError("Could not reach the server. Check your internet and try again.");
+        } else {
+          setOtpError(err.message || "Something went wrong. Please try again.");
+        }
+      } else {
+        setOtpError("Something went wrong. Please try again.");
       }
-      // Correct code: navigate straight to "/" without success screen
-      router.push("/");
-    } else {
-      setOtpError("That code is not correct. Try again.");
       setOtp(""); // Clear boxes on incorrect attempt
+    } finally {
+      setVerifying(false);
     }
   };
 
   // Resend OTP handler
-  const handleResend = () => {
+  const handleResend = async () => {
     if (resendTimer > 0) return;
-
-    // Future backend integration:
-    // Call POST /auth/request-otp with { phone }
-    setResendTimer(30);
-    setOtp("");
-    setOtpError("");
-    setResendFeedback("OTP sent again");
-    setTimeout(() => setResendFeedback(""), 3500);
+    setSending(true);
+    try {
+      await requestOtp(phone);
+      setResendTimer(30);
+      setOtp("");
+      setOtpError("");
+      setResendFeedback("OTP sent again");
+      setTimeout(() => setResendFeedback(""), 3500);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 0) {
+        setOtpError("Could not reach the server. Check your internet and try again.");
+      } else {
+        setOtpError("Could not resend the code. Please try again.");
+      }
+    } finally {
+      setSending(false);
+    }
   };
 
   // Format phone number for readability: "+91 98765 43210"
@@ -152,6 +204,14 @@ export default function LoginPage() {
           )}
         </div>
       </header>
+
+      {/* Session-expired banner */}
+      {sessionReason === "session_expired" && step === 1 && (
+        <div className="w-full px-4 py-3 rounded-2xl bg-[#FEF2F2] border border-[#FECACA] flex items-center gap-2">
+          <AlertIcon className="w-4 h-4 text-[#DC2626] shrink-0" />
+          <span className="text-sm text-[#DC2626] font-medium">Please log in again to continue.</span>
+        </div>
+      )}
 
       {/* Main card */}
       <div className="w-full bg-white rounded-3xl p-6 sm:p-8 border border-[#DCD6C0] shadow-sm flex flex-col gap-6">
@@ -226,9 +286,14 @@ export default function LoginPage() {
             {/* Action button: Send OTP (at least 56px tall) */}
             <button
               type="submit"
-              className="min-h-[56px] w-full mt-2 py-3.5 rounded-2xl bg-[#235334] hover:bg-[#1A3E27] text-[#FAF7EE] font-bold text-base sm:text-lg shadow-sm active:scale-95 transition-all flex items-center justify-center text-center cursor-pointer"
+              disabled={sending}
+              className={`min-h-[56px] w-full mt-2 py-3.5 rounded-2xl font-bold text-base sm:text-lg shadow-sm active:scale-95 transition-all flex items-center justify-center text-center ${
+                sending
+                  ? "bg-[#EFEAD8] text-[#8C9A8F] cursor-not-allowed border border-[#D1CAAD]"
+                  : "bg-[#235334] hover:bg-[#1A3E27] text-[#FAF7EE] cursor-pointer"
+              }`}
             >
-              Send OTP
+              {sending ? "Sending…" : "Send OTP"}
             </button>
 
             {/* Signup redirect link */}
@@ -284,14 +349,14 @@ export default function LoginPage() {
             {/* Action button: Log in (at least 56px tall) */}
             <button
               type="submit"
-              disabled={otp.length !== 6}
+              disabled={otp.length !== 6 || verifying}
               className={`min-h-[56px] w-full py-3.5 rounded-2xl font-bold text-base sm:text-lg shadow-sm transition-all flex items-center justify-center text-center ${
-                otp.length === 6
+                otp.length === 6 && !verifying
                   ? "bg-[#235334] hover:bg-[#1A3E27] text-[#FAF7EE] active:scale-95 cursor-pointer"
                   : "bg-[#EFEAD8] text-[#8C9A8F] cursor-not-allowed border border-[#D1CAAD]"
               }`}
             >
-              Log in
+              {verifying ? "Logging in…" : "Log in"}
             </button>
 
             {/* Secondary actions: Change phone number & Resend OTP */}
@@ -317,9 +382,10 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={handleResend}
-                    className="font-bold text-[#235334] hover:underline py-1 cursor-pointer"
+                    disabled={sending}
+                    className="font-bold text-[#235334] hover:underline py-1 cursor-pointer disabled:opacity-50"
                   >
-                    Resend OTP
+                    {sending ? "Sending…" : "Resend OTP"}
                   </button>
                 )}
               </div>

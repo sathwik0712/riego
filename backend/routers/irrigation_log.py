@@ -7,6 +7,7 @@ import models
 from schemas import IrrigationLogCreate, IrrigationLogOut, IrrigationLogHistoryOut, DetectedIrrigationEvent
 from normalize import to_utc
 from services.irrigation_detection import detect_irrigation_events
+from routers.auth import get_current_farmer
 
 # APIRouter for irrigation log endpoints
 router = APIRouter(tags=["Irrigation Log"])
@@ -15,10 +16,14 @@ router = APIRouter(tags=["Irrigation Log"])
 # Record a new irrigation log entry
 @router.post("/irrigation-log", response_model=IrrigationLogOut, status_code=status.HTTP_201_CREATED)
 @router.post("/irrigation-log/", response_model=IrrigationLogOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def create_irrigation_log(log_in: IrrigationLogCreate, db: Session = Depends(get_db)):
-    # 404 if the field does not exist
+def create_irrigation_log(
+    log_in: IrrigationLogCreate,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == log_in.field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -69,11 +74,12 @@ def create_irrigation_log(log_in: IrrigationLogCreate, db: Session = Depends(get
 def get_field_irrigation_logs(
     field_id: int,
     days: int = Query(default=7, ge=1, le=90),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -105,19 +111,19 @@ def get_field_irrigation_logs(
 def get_detected_irrigation(
     field_id: int,
     hours: int = Query(default=168, ge=1, le=720),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
     """
     Scan soil moisture readings and return detected irrigation events where moisture
     jumped by at least 10% within 60 minutes.
-    Does NOT write to irrigation_logs. Returns 404 for an unknown field, empty list if none found.
+    Does NOT write to irrigation_logs. Returns 404 for an unknown field or another farmer's field, empty list if none found.
     """
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
         )
 
     return detect_irrigation_events(db, field_id=field_id, hours=hours)
-

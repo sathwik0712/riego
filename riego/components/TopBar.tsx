@@ -8,7 +8,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Logo from "./Logo";
 import { LogoutIcon } from "./icons";
-import { endSession } from "@/lib/session";
+import { clearSession } from "@/lib/auth";
+import { clearAllFarmerCaches } from "@/lib/cache";
+import { logoutFromServer } from "@/lib/api";
 import { STRINGS } from "../lib/strings";
 
 // Format date e.g. "Sunday, 15 November 2026"
@@ -150,8 +152,11 @@ export default function TopBar({
                     role="menuitem"
                     onClick={() => {
                       setIsMenuOpen(false);
-                      endSession();
-                      router.push("/welcome");
+                      logoutFromServer().finally(() => {
+                        clearSession();
+                        clearAllFarmerCaches();
+                        router.push("/welcome");
+                      });
                     }}
                     className="min-h-[44px] px-3 py-2 rounded-xl bg-[#FAF7EE] hover:bg-[#EFEAD8] active:scale-95 text-[#DC2626] font-semibold text-sm flex items-center gap-2.5 transition-all cursor-pointer"
                   >

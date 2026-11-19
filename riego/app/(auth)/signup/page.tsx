@@ -1,8 +1,8 @@
 "use client";
 
-// Signup flow with two sequential screens:
-// Screen 1: Farmer details (Name, Phone, Village, Preferred Language)
-// Screen 2: OTP verification (6-digit input, demo code 123456, resend timer)
+// Signup flow:
+// Screen 1: Farmer details (Name, Phone, Village, Preferred Language) → no backend yet
+// Screen 2: OTP → POST /auth/signup → save session → success screen
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -11,15 +11,15 @@ import { CheckIcon, AlertIcon } from "@/components/icons";
 import OtpInput from "@/components/OtpInput";
 import { languageOptions } from "@/lib/sampleData";
 import { SignupFormData } from "@/lib/types";
-import { saveFarmer, startSession } from "@/lib/session";
-
-// Fake constant for demo mode
-const FAKE_OTP = "123456";
+import { signupFarmer, ApiError } from "@/lib/api";
+import { saveSession, clearSession } from "@/lib/auth";
+import { clearAllFarmerCaches } from "@/lib/cache";
 
 export default function SignupPage() {
-  // Step 1 = Details, Step 2 = OTP, Step 3 = Account Created Success
+  // Step 1 = Details, Step 2 = OTP, then success
   const [step, setStep] = useState<1 | 2>(1);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [signedInName, setSignedInName] = useState("");
 
   // Form fields stored in a single object
   const [formData, setFormData] = useState<SignupFormData>({
@@ -41,16 +41,16 @@ export default function SignupPage() {
   const [otpError, setOtpError] = useState("");
   const [resendTimer, setResendTimer] = useState(30);
   const [resendFeedback, setResendFeedback] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [generalError, setGeneralError] = useState("");
 
   // Resend countdown timer for Screen 2
   useEffect(() => {
     if (step !== 2 || isSuccess) return;
     if (resendTimer <= 0) return;
-
     const interval = setInterval(() => {
       setResendTimer((prev) => prev - 1);
     }, 1000);
-
     return () => clearInterval(interval);
   }, [step, resendTimer, isSuccess]);
 
@@ -76,49 +76,74 @@ export default function SignupPage() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handler for Screen 1 submission (Send OTP)
+  // Handler for Screen 1 submission (move to OTP screen)
   const handleSendOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
-
-    // Future backend integration:
-    // 1. Call POST /auth/signup with { name, phone, village, preferred_language }
-    // 2. Call POST /auth/request-otp with { phone }
-
+    setGeneralError("");
     setStep(2);
     setResendTimer(30);
     setOtp("");
     setOtpError("");
   };
 
-  // Handler for Screen 2 submission (Verify OTP)
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  // Handler for Screen 2 submission (Verify OTP + create account)
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Future backend integration:
-    // Call POST /auth/verify-otp with { phone, otp }
-    if (otp === FAKE_OTP) {
-      const farmer = saveFarmer(
-        formData.name,
-        formData.phone,
-        formData.village,
-        formData.preferredLanguage
-      );
-      startSession(farmer);
-      setOtpError("");
-      setIsSuccess(true);
-    } else {
+    if (otp.length !== 6) return;
+    if (otp !== "123456") {
+      // Client-side check for the demo OTP before hitting the backend
       setOtpError("That code is not correct. Try again.");
-      setOtp(""); // Clear boxes on incorrect attempt
+      setOtp("");
+      return;
+    }
+
+    setSubmitting(true);
+    setOtpError("");
+    setGeneralError("");
+
+    try {
+      const res = await signupFarmer({
+        name: formData.name.trim(),
+        phone: formData.phone,
+        village: formData.village.trim(),
+        preferred_language: formData.preferredLanguage,
+      });
+      // Clear any previous farmer's cached data before saving new session
+      clearAllFarmerCaches();
+      saveSession(res.token, {
+        farmer_id: res.farmer_id,
+        name: res.name,
+        phone: res.phone,
+        village: res.village,
+        preferred_language: res.preferred_language,
+      });
+      setSignedInName(res.name);
+      setIsSuccess(true);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 409) {
+          // Phone already registered
+          setGeneralError("");
+          setOtpError(""); // clear otp error
+          setErrors({ phone: "This phone number already has an account." });
+          setStep(1); // go back to details screen to show the phone error
+        } else if (err.status === 0) {
+          setGeneralError("Could not reach the server. Check your internet and try again.");
+        } else {
+          setGeneralError(err.message || "Something went wrong. Please try again.");
+        }
+      } else {
+        setGeneralError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  // Resend OTP handler
+  // Resend OTP handler (demo — just resets the timer)
   const handleResend = () => {
     if (resendTimer > 0) return;
-
-    // Future backend integration:
-    // Call POST /auth/request-otp with { phone }
     setResendTimer(30);
     setOtp("");
     setOtpError("");
@@ -160,9 +185,11 @@ export default function SignupPage() {
             </button>
           )}
 
-          <span className="text-xs sm:text-sm font-semibold text-[#5F6E62] bg-[#EFEAD8] px-3.5 py-1.5 rounded-full border border-[#D1CAAD]">
-            {step === 1 ? "Step 1 of 2" : "Step 2 of 2"}
-          </span>
+          {!isSuccess && (
+            <span className="text-xs sm:text-sm font-semibold text-[#5F6E62] bg-[#EFEAD8] px-3.5 py-1.5 rounded-full border border-[#D1CAAD]">
+              {step === 1 ? "Step 1 of 2" : "Step 2 of 2"}
+            </span>
+          )}
         </div>
       </header>
 
@@ -236,6 +263,7 @@ export default function SignupPage() {
                   onChange={(e) => {
                     const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 10);
                     setFormData({ ...formData, phone: digitsOnly });
+                    if (errors.phone) setErrors({ ...errors, phone: undefined });
                   }}
                   className={`flex-1 min-w-0 min-h-[56px] h-14 px-4 rounded-2xl border text-base text-[#1B2D21] transition-all outline-none ${
                     errors.phone
@@ -247,7 +275,14 @@ export default function SignupPage() {
               {errors.phone && (
                 <p className="text-sm text-[#DC2626] flex items-center gap-1.5 mt-0.5">
                   <AlertIcon className="w-4 h-4 text-[#DC2626] shrink-0" />
-                  <span>{errors.phone}</span>
+                  <span>
+                    {errors.phone}{" "}
+                    {errors.phone.includes("already has an account") && (
+                      <Link href="/login" className="font-bold underline hover:text-[#991B1B]">
+                        Log in instead.
+                      </Link>
+                    )}
+                  </span>
                 </p>
               )}
             </div>
@@ -358,6 +393,14 @@ export default function SignupPage() {
               </span>
             </div>
 
+            {/* General error (e.g. server unreachable) */}
+            {generalError && (
+              <div className="px-4 py-3 rounded-2xl bg-[#FEF2F2] border border-[#FECACA] flex items-center gap-2">
+                <AlertIcon className="w-4 h-4 text-[#DC2626] shrink-0" />
+                <span className="text-sm text-[#DC2626]">{generalError}</span>
+              </div>
+            )}
+
             {/* 6-digit OTP input component */}
             <div className="py-2 flex flex-col items-center gap-2">
               <OtpInput
@@ -379,14 +422,14 @@ export default function SignupPage() {
             {/* Action button: Verify (at least 56px tall) */}
             <button
               type="submit"
-              disabled={otp.length !== 6}
+              disabled={otp.length !== 6 || submitting}
               className={`min-h-[56px] w-full py-3.5 rounded-2xl font-bold text-base sm:text-lg shadow-sm transition-all flex items-center justify-center text-center ${
-                otp.length === 6
+                otp.length === 6 && !submitting
                   ? "bg-[#235334] hover:bg-[#1A3E27] text-[#FAF7EE] active:scale-95 cursor-pointer"
                   : "bg-[#EFEAD8] text-[#8C9A8F] cursor-not-allowed border border-[#D1CAAD]"
               }`}
             >
-              Verify
+              {submitting ? "Creating account…" : "Verify"}
             </button>
 
             {/* Secondary actions: Change phone number & Resend OTP */}
@@ -398,6 +441,7 @@ export default function SignupPage() {
                     setStep(1);
                     setOtp("");
                     setOtpError("");
+                    setGeneralError("");
                   }}
                   className="font-bold text-[#235334] hover:underline py-1"
                 >
@@ -443,7 +487,7 @@ export default function SignupPage() {
                 Account created
               </h1>
               <p className="text-base sm:text-lg text-[#5F6E62]">
-                Welcome, {formData.name.trim()}
+                Welcome, {signedInName.trim()}
               </p>
             </div>
 

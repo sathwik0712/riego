@@ -6,6 +6,7 @@ from database import get_db
 import models
 from schemas import ForecastSnapshotOut
 from services.weather import fetch_field_weather, WeatherUnavailable
+from routers.auth import get_current_farmer
 
 # APIRouter for weather-related endpoints
 router = APIRouter(prefix="/weather", tags=["Weather"])
@@ -16,14 +17,15 @@ router = APIRouter(prefix="/weather", tags=["Weather"])
 def get_field_weather_history(
     field_id: int,
     hours: int = Query(default=24, ge=1, le=720),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
     """
     Get saved historical weather readings for a field over the last N hours (oldest first).
     """
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -68,14 +70,15 @@ def get_field_weather_history(
 def get_field_forecast_history(
     field_id: int,
     hours: int = Query(default=72, ge=1, le=720),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
     """
     Get saved historical forecast snapshots for a field over the last N hours (oldest first).
     """
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -96,17 +99,20 @@ def get_field_forecast_history(
     return snapshots
 
 
-
 @router.get("/{field_id}")
-def get_field_weather(field_id: int, db: Session = Depends(get_db)):
+def get_field_weather(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
     """
     Get current weather and 5-day forecast for a field by its ID.
     Reuses in-memory cached results for matching coordinates within 10 minutes,
     and records fresh current weather into weather_readings history.
     """
-    # Look up the field by its ID
+    # Look up the field by its ID and check ownership
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"

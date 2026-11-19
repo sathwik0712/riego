@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -9,6 +9,7 @@ from normalize import to_utc
 from ml.predict import predict_for_field
 from ml.scheduler import build_plan, build_farmer_plan, format_advice_sentence
 from services.auto_recommend import ensure_recommendation, _rec_to_dict
+from routers.auth import get_current_farmer
 
 # APIRouter for recommendation endpoints
 router = APIRouter(tags=["Recommendations"])
@@ -17,10 +18,14 @@ router = APIRouter(tags=["Recommendations"])
 # Create a new recommendation for a field
 @router.post("/recommendations", response_model=RecommendationOut, status_code=status.HTTP_201_CREATED)
 @router.post("/recommendations/", response_model=RecommendationOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def create_recommendation(rec_in: RecommendationCreate, db: Session = Depends(get_db)):
-    # 404 if the field does not exist
+def create_recommendation(
+    rec_in: RecommendationCreate,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == rec_in.field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -49,11 +54,12 @@ def create_recommendation(rec_in: RecommendationCreate, db: Session = Depends(ge
 def get_field_recommendations(
     field_id: int,
     limit: int = Query(default=10, ge=1, le=50),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -72,13 +78,17 @@ def get_field_recommendations(
 
 # Get irrigation prediction and time-slotted plan for a field
 @router.get("/fields/{field_id}/recommendation")
-def get_field_recommendation(field_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_field_recommendation(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+) -> Dict[str, Any]:
     """
     Return ML prediction, time-slotted plan, and farmer-facing advice sentence for a field.
-    Does not write to database. 404 for unknown field.
+    Does not write to database. 404 for unknown field or field belonging to another farmer.
     """
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field with ID {field_id} not found."
@@ -121,41 +131,39 @@ def get_field_recommendation(field_id: int, db: Session = Depends(get_db)) -> Di
     return result
 
 
-# Get time-ordered daily plan across all fields for a farmer (same-pump deconfliction)
+# Get time-ordered daily plan across all fields for the authenticated farmer (same-pump deconfliction)
 @router.get("/plan/today")
 def get_today_plan(
-    farmer_id: str = Query(default="farmer_001"),
+    farmer_id: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ) -> List[Dict[str, Any]]:
     """
-    Return all scheduled irrigation slots across all fields belonging to farmer_id,
+    Return all scheduled irrigation slots across all fields belonging to authenticated farmer,
     ordered chronologically and shifted to eliminate pump conflicts.
+    Ignores optional farmer_id query parameter and uses token identity.
     Does not write to database.
     """
-    return build_farmer_plan(db, farmer_id=farmer_id)
-
-
-def _rec_to_dict(rec: models.Recommendation) -> Dict[str, Any]:
-    return {
-        "id": rec.id,
-        "field_id": rec.field_id,
-        "created_at": rec.created_at.isoformat() if rec.created_at else None,
-        "advice_text": rec.advice_text,
-        "action": rec.action,
-        "water_at": rec.water_at.isoformat() if rec.water_at else None,
-        "duration_minutes": rec.duration_minutes,
-        "source": rec.source,
-        "status": rec.status,
-    }
+    return build_farmer_plan(db, farmer_id=current_farmer.farmer_id)
 
 
 # Save ML-generated plan into recommendations table on request
 @router.post("/fields/{field_id}/recommendation/generate")
-def generate_field_recommendation(field_id: int, db: Session = Depends(get_db)) -> Any:
+def generate_field_recommendation(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+) -> Any:
     """
     Save the ML plan into the recommendations table using existing columns.
     If an open (not done) recommendation exists from the last 6 hours, returns it without duplicating.
     Nothing is saved when should_irrigate is False or status is not 'ok'.
-    404 for unknown field.
+    404 for unknown field or field belonging to another farmer.
     """
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field or field.farmer_id != current_farmer.farmer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Field with ID {field_id} not found."
+        )
     return ensure_recommendation(db, field_id)

@@ -9,6 +9,7 @@ from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
 from services.conditions import get_field_conditions
 from pump import resolve_pump_flow
 from ml.predict import predict_for_field
+from routers.auth import get_current_farmer
 
 # APIRouter for field-related endpoints
 router = APIRouter(prefix="/fields", tags=["Fields"])
@@ -16,7 +17,11 @@ router = APIRouter(prefix="/fields", tags=["Fields"])
 # Create a new field
 @router.post("", response_model=FieldOut, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=FieldOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def create_field(field_in: FieldCreate, db: Session = Depends(get_db)):
+def create_field(
+    field_in: FieldCreate,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
     # Check if device_id is already assigned to an existing field
     if field_in.device_id:
         existing_device = db.query(models.Field).filter(models.Field.device_id == field_in.device_id).first()
@@ -29,9 +34,9 @@ def create_field(field_in: FieldCreate, db: Session = Depends(get_db)):
     # Resolve pump flow rate and source based on typed flow or horsepower
     flow_lph, flow_source = resolve_pump_flow(field_in.pump_flow_rate, field_in.pump_hp)
 
-    # Instantiate the new field with fixed farmer_id "farmer_001"
+    # Instantiate the new field with logged-in farmer_id
     new_field = models.Field(
-        farmer_id="farmer_001",
+        farmer_id=current_farmer.farmer_id,
         nickname=field_in.nickname,
         latitude=field_in.latitude,
         longitude=field_in.longitude,
@@ -54,18 +59,30 @@ def create_field(field_in: FieldCreate, db: Session = Depends(get_db)):
     db.refresh(new_field)
     return new_field
 
-# List all fields, ordered newest first
+# List all fields for the logged-in farmer, ordered newest first
 @router.get("", response_model=List[FieldOut])
 @router.get("/", response_model=List[FieldOut], include_in_schema=False)
-def get_fields(db: Session = Depends(get_db)):
-    fields = db.query(models.Field).order_by(models.Field.registered_at.desc(), models.Field.id.desc()).all()
+def get_fields(
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    fields = (
+        db.query(models.Field)
+        .filter(models.Field.farmer_id == current_farmer.farmer_id)
+        .order_by(models.Field.registered_at.desc(), models.Field.id.desc())
+        .all()
+    )
     return fields
 
 # Get a single field by ID
 @router.get("/{field_id}", response_model=FieldOut)
-def get_field(field_id: int, db: Session = Depends(get_db)):
+def get_field(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field with ID {field_id} not found."
@@ -74,10 +91,14 @@ def get_field(field_id: int, db: Session = Depends(get_db)):
 
 # Get the latest sensor reading status for a field
 @router.get("/{field_id}/latest-reading")
-def get_latest_reading(field_id: int, db: Session = Depends(get_db)):
-    # 404 if the field does not exist
+def get_latest_reading(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field with ID {field_id} not found."
@@ -96,14 +117,18 @@ def get_latest_reading(field_id: int, db: Session = Depends(get_db)):
 
 # Get combined conditions (soil moisture, weather, crop, notes) for a field
 @router.get("/{field_id}/conditions")
-def get_field_conditions_endpoint(field_id: int, db: Session = Depends(get_db)):
+def get_field_conditions_endpoint(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
     """
     Get aggregated field telemetry and current conditions:
     soil moisture, weather snapshot, days since sowing, and notices.
     """
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -124,15 +149,16 @@ def get_field_conditions_endpoint(field_id: int, db: Session = Depends(get_db)):
 def create_manual_reading(
     field_id: int,
     reading_in: ManualReadingCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
 ):
     """
     Record a manual soil moisture reading (0 to 100%) for a field.
     Flows through the same pipeline as sensor readings so history and conditions reflect it.
     """
-    # 404 if the field does not exist
+    # 404 if the field does not exist or belongs to another farmer
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Field not found"
@@ -173,21 +199,24 @@ def create_manual_reading(
 
 # GET /fields/{field_id}/prediction — ML irrigation prediction for one field
 @router.get("/{field_id}/prediction")
-def get_field_prediction(field_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_field_prediction(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+) -> Dict[str, Any]:
     """
     Return an ML-based irrigation prediction for a single field.
 
-    - 404 if the field does not exist.
+    - 404 if the field does not exist or belongs to another farmer.
     - Does not write to the database.
     - status "ok": full prediction result.
     - status "not_enough_data": no moisture reading or field not sown.
     - status "error": model files missing or other failure.
     """
     field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
+    if not field or field.farmer_id != current_farmer.farmer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Field with ID {field_id} not found.",
         )
     return predict_for_field(db, field_id)
-

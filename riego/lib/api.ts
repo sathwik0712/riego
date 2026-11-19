@@ -1,5 +1,7 @@
 // API Connection Layer for Riego
-// Communicates with the FastAPI backend and provides friendly farmer-facing error handling
+// Communicates with the FastAPI backend and provides friendly farmer-facing error handling.
+// Every call to a protected endpoint sends "Authorization: Bearer <token>".
+// A 401 response clears the session and redirects to /login.
 
 import {
   sampleAdvice,
@@ -38,6 +40,37 @@ export class ApiError extends Error {
   }
 }
 
+// Paths that do NOT need an Authorization header
+const UNPROTECTED_PATHS = new Set([
+  "/health",
+  "/auth/request-otp",
+  "/auth/verify-otp",
+  "/auth/signup",
+]);
+
+function isProtected(path: string): boolean {
+  const normalised = path.startsWith("/") ? path : `/${path}`;
+  // sensor-readings POST is unprotected (hardware device ingest handled server-side)
+  // but we don't call that from the frontend, so checking the set is enough here
+  return !UNPROTECTED_PATHS.has(normalised);
+}
+
+/** Handle a 401: clear session + all cached data, then redirect to /login. */
+function handle401(): never {
+  // Import lazily to avoid circular deps at module load time
+  const { clearSession } = require("./auth") as typeof import("./auth");
+  const { clearAllFarmerCaches } = require("./cache") as typeof import("./cache");
+  clearSession();
+  clearAllFarmerCaches();
+  if (typeof window !== "undefined") {
+    const url = new URL("/login", window.location.href);
+    url.searchParams.set("reason", "session_expired");
+    window.location.href = url.toString();
+  }
+  // TypeScript needs a never return; throw to satisfy it
+  throw new ApiError(401, "Please log in again");
+}
+
 // Core request helper: sends JSON, aborts after 10 seconds, parses responses
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -47,12 +80,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+  // Build headers — add bearer token for protected paths
+  const extraHeaders: Record<string, string> = {};
+  if (isProtected(normalizedPath) && typeof window !== "undefined") {
+    const { getToken } = require("./auth") as typeof import("./auth");
+    const token = getToken();
+    if (token) {
+      extraHeaders["Authorization"] = `Bearer ${token}`;
+    }
+  }
+
   try {
     const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...extraHeaders,
         ...(options.headers || {}),
       },
       signal: controller.signal,
@@ -67,6 +111,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       } catch {
         data = null;
       }
+    }
+
+    // 401: session expired or invalid — clear and redirect
+    if (res.status === 401) {
+      handle401();
     }
 
     // Handle HTTP error responses
@@ -119,6 +168,71 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     method: "POST",
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+}
+
+// ----------------------------------------------------------------------------
+// Auth API calls (unprotected)
+// ----------------------------------------------------------------------------
+
+export interface RequestOtpResponse {
+  message: string;
+  expires_in_seconds: number;
+}
+
+export interface VerifyOtpResponse {
+  token: string;
+  farmer: {
+    farmer_id: string;
+    name: string;
+    phone: string;
+    village: string;
+    preferred_language: string;
+    created_at: string;
+  };
+}
+
+export interface SignupResponse {
+  farmer_id: string;
+  name: string;
+  phone: string;
+  village: string;
+  preferred_language: string;
+  created_at: string;
+  token: string;
+}
+
+/** POST /auth/request-otp */
+export async function requestOtp(phone: string): Promise<RequestOtpResponse> {
+  return apiPost<RequestOtpResponse>("/auth/request-otp", { phone });
+}
+
+/** POST /auth/verify-otp */
+export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResponse> {
+  return apiPost<VerifyOtpResponse>("/auth/verify-otp", { phone, otp });
+}
+
+/** POST /auth/signup */
+export async function signupFarmer(data: {
+  name: string;
+  phone: string;
+  village: string;
+  preferred_language: string;
+}): Promise<SignupResponse> {
+  return apiPost<SignupResponse>("/auth/signup", data);
+}
+
+/** GET /auth/me — returns the current farmer from their token. */
+export async function getMe(): Promise<SignupResponse> {
+  return apiGet<SignupResponse>("/auth/me");
+}
+
+/** POST /auth/logout — invalidates the token on the server. Ignores failures. */
+export async function logoutFromServer(): Promise<void> {
+  try {
+    await apiPost<{ message: string }>("/auth/logout");
+  } catch {
+    // best-effort — always clear locally regardless
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -213,6 +327,9 @@ export async function createField(data: FieldCreateData): Promise<BackendField> 
     payload.pump_hp = Number(payload.pump_hp);
   }
 
+  // Remove farmer_id from the payload — the backend reads it from the token
+  delete payload.farmer_id;
+
   return apiPost<BackendField>("/fields", payload as FieldCreateData);
 }
 
@@ -248,9 +365,9 @@ export async function getIrrigationLog(
   return apiGet<IrrigationLogResponse>(`/fields/${fieldId}/irrigation-log?days=${days}`);
 }
 
-// Fetch the farmer's time-slotted irrigation plan from GET /plan/today
-export async function getTodayPlan(farmerId = "farmer_001"): Promise<PlanSlot[]> {
-  return apiGet<PlanSlot[]>(`/plan/today?farmer_id=${encodeURIComponent(farmerId)}`);
+// Fetch the farmer's time-slotted irrigation plan — backend infers farmer from token
+export async function getTodayPlan(): Promise<PlanSlot[]> {
+  return apiGet<PlanSlot[]>("/plan/today");
 }
 
 // Fetch ML recommendation and schedule for a single field

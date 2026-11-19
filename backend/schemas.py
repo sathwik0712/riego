@@ -433,6 +433,7 @@ class FarmerOut(BaseModel):
     village: str
     preferred_language: str
     created_at: datetime
+    token: Optional[str] = None
 
     if IS_V2:
         model_config = ConfigDict(from_attributes=True)

@@ -200,4 +200,25 @@ class ForecastSnapshot(Base):
     )
 
 
+# Authentication tokens for session management
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    # Primary key (auto-incremented integer)
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Required farmer ID referencing farmers table
+    farmer_id = Column(String, ForeignKey("farmers.farmer_id"), nullable=False, index=True)
+
+    # SHA-256 hash of the bearer token
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+
+    # Creation timestamp in UTC
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Expiration timestamp in UTC (30 days)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+
 
