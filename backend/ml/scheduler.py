@@ -138,6 +138,7 @@ def build_plan(
                     f"Skipped irrigation on {slot_dt.strftime('%d %b')} because "
                     f"heavy rain ({rain_mm:.1f} mm) is forecast."
                 ),
+                "recommendation_id": None,
             })
         else:
             time_desc = "morning" if slot_dt.hour < 12 else "evening"
@@ -156,6 +157,7 @@ def build_plan(
                 "start": slot_dt.isoformat(),
                 "duration_minutes": dur,
                 "reason": reason,
+                "recommendation_id": None,
             })
 
     return slots
@@ -204,10 +206,23 @@ def build_farmer_plan(
 
         field_slots = build_plan(pred, now_ist=now, daily_forecast=daily_forecast)
 
+        # Match saved open recommendation for this field (null when none)
+        open_rec = (
+            db.query(models.Recommendation)
+            .filter(
+                models.Recommendation.field_id == field.id,
+                models.Recommendation.status == "pending",
+            )
+            .order_by(models.Recommendation.created_at.desc())
+            .first()
+        )
+        rec_id = open_rec.id if open_rec else None
+
         for slot in field_slots:
             enriched_slot = dict(slot)
             enriched_slot["field_id"] = field.id
             enriched_slot["field_nickname"] = field.nickname or f"Field {field.id}"
+            enriched_slot["recommendation_id"] = rec_id
             all_slots.append(enriched_slot)
 
     if not all_slots:

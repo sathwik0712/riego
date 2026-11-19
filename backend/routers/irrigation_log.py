@@ -27,7 +27,12 @@ def create_irrigation_log(log_in: IrrigationLogCreate, db: Session = Depends(get
     # Validate recommendation if provided
     if log_in.recommendation_id is not None:
         rec = db.query(models.Recommendation).filter(models.Recommendation.id == log_in.recommendation_id).first()
-        if not rec or rec.field_id != log_in.field_id:
+        if not rec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Recommendation with ID {log_in.recommendation_id} not found"
+            )
+        if rec.field_id != log_in.field_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Recommendation does not belong to this field"

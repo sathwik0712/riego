@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 import models
 from services.weather import fetch_field_weather, WeatherUnavailable
+from services.auto_recommend import ensure_recommendation
 
 COLLECT_EVERY_MINUTES = 60
 PAUSE_BETWEEN_FIELDS_SECONDS = 2
+AUTO_RECOMMEND_ENABLED = True
 
 
 def run_collection_once() -> Dict[str, int]:
@@ -23,6 +25,13 @@ def run_collection_once() -> Dict[str, int]:
     skipped_count = 0
     unavailable_count = 0
     error_count = 0
+
+    rec_created = 0
+    rec_open = 0
+    rec_not_needed = 0
+    rec_no_data = 0
+    rec_stale = 0
+    rec_error = 0
 
     try:
         fields = (
@@ -48,6 +57,7 @@ def run_collection_once() -> Dict[str, int]:
             )
             before_id = latest_before.id if latest_before else None
 
+            weather_saved = False
             try:
                 fetch_field_weather(db, field)
 
@@ -66,6 +76,7 @@ def run_collection_once() -> Dict[str, int]:
                 else:
                     skipped_count += 1
                     print(f"[Collector] {field_label}: skipped")
+                weather_saved = True
             except WeatherUnavailable:
                 unavailable_count += 1
                 print(f"[Collector] {field_label}: weather unavailable")
@@ -73,9 +84,39 @@ def run_collection_once() -> Dict[str, int]:
                 error_count += 1
                 print(f"[Collector] {field_label}: failed ({e})")
 
+            # After a field's weather is saved, call ensure_recommendation for that field
+            if AUTO_RECOMMEND_ENABLED:
+                try:
+                    rec_res = ensure_recommendation(db, field.id)
+                    outcome = rec_res.get("result", "not_needed")
+                    if outcome == "created":
+                        rec_created += 1
+                        print(f"[Collector] {field_label} recommendation: created")
+                    elif outcome == "already_open":
+                        rec_open += 1
+                        print(f"[Collector] {field_label} recommendation: already open")
+                    elif outcome == "not_needed":
+                        rec_not_needed += 1
+                        print(f"[Collector] {field_label} recommendation: not needed")
+                    elif outcome == "not_enough_data":
+                        rec_no_data += 1
+                        print(f"[Collector] {field_label} recommendation: not enough data")
+                    elif outcome == "stale":
+                        rec_stale += 1
+                        print(f"[Collector] {field_label} recommendation: stale")
+                    else:
+                        rec_not_needed += 1
+                        print(f"[Collector] {field_label} recommendation: {outcome}")
+                except Exception as e:
+                    rec_error += 1
+                    print(f"[Collector] {field_label} recommendation: error ({e})")
+
         print(
             f"[Collector] Collection complete: {saved_count} saved, {skipped_count} skipped, "
-            f"{unavailable_count} weather unavailable, {error_count} errors ({total_fields} fields total)"
+            f"{unavailable_count} weather unavailable, {error_count} errors; "
+            f"recommendations: {rec_created} created, {rec_open} already open, "
+            f"{rec_not_needed} not needed, {rec_no_data} not enough data, "
+            f"{rec_stale} stale, {rec_error} errors ({total_fields} fields total)"
         )
 
         return {
@@ -84,6 +125,12 @@ def run_collection_once() -> Dict[str, int]:
             "skipped": skipped_count,
             "unavailable": unavailable_count,
             "error": error_count,
+            "rec_created": rec_created,
+            "rec_already_open": rec_open,
+            "rec_not_needed": rec_not_needed,
+            "rec_not_enough_data": rec_no_data,
+            "rec_stale": rec_stale,
+            "rec_error": rec_error,
         }
     finally:
         db.close()

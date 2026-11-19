@@ -8,6 +8,7 @@ from schemas import RecommendationCreate, RecommendationOut
 from normalize import to_utc
 from ml.predict import predict_for_field
 from ml.scheduler import build_plan, build_farmer_plan, format_advice_sentence
+from services.auto_recommend import ensure_recommendation, _rec_to_dict
 
 # APIRouter for recommendation endpoints
 router = APIRouter(tags=["Recommendations"])
@@ -98,6 +99,20 @@ def get_field_recommendation(field_id: int, db: Session = Depends(get_db)) -> Di
     field_name = field.nickname or f"Field {field.id}"
     advice = format_advice_sentence(field_name, slots, pred.get("should_irrigate", False))
 
+    # Match saved open recommendation for this field (null when none)
+    open_rec = (
+        db.query(models.Recommendation)
+        .filter(
+            models.Recommendation.field_id == field_id,
+            models.Recommendation.status == "pending",
+        )
+        .order_by(models.Recommendation.created_at.desc())
+        .first()
+    )
+    rec_id = open_rec.id if open_rec else None
+    for s in slots:
+        s["recommendation_id"] = rec_id
+
     result = dict(pred)
     result["field_nickname"] = field.nickname
     result["action"] = "water" if pred.get("should_irrigate") else "wait"
@@ -143,72 +158,4 @@ def generate_field_recommendation(field_id: int, db: Session = Depends(get_db)) 
     Nothing is saved when should_irrigate is False or status is not 'ok'.
     404 for unknown field.
     """
-    field = db.query(models.Field).filter(models.Field.id == field_id).first()
-    if not field:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Field with ID {field_id} not found."
-        )
-
-    # Check for existing open recommendation from the last 6 hours
-    cutoff_6h = datetime.now(timezone.utc) - timedelta(hours=6)
-    existing = (
-        db.query(models.Recommendation)
-        .filter(
-            models.Recommendation.field_id == field_id,
-            models.Recommendation.status != "done",
-            models.Recommendation.created_at >= cutoff_6h,
-        )
-        .order_by(models.Recommendation.created_at.desc())
-        .first()
-    )
-    if existing:
-        return _rec_to_dict(existing)
-
-    pred = predict_for_field(db, field_id)
-
-    # Nothing is saved when should_irrigate is false or status is not "ok"
-    if pred.get("status") != "ok" or not pred.get("should_irrigate"):
-        return {
-            "saved": False,
-            "status": pred.get("status"),
-            "should_irrigate": pred.get("should_irrigate", False),
-            "message": "No irrigation recommendation needed or data not ready; nothing saved.",
-        }
-
-    snap = (
-        db.query(models.ForecastSnapshot)
-        .filter(models.ForecastSnapshot.field_id == field_id)
-        .order_by(models.ForecastSnapshot.fetched_at.desc())
-        .first()
-    )
-    daily_forecast = snap.daily_summary if snap else None
-
-    slots = build_plan(pred, daily_forecast=daily_forecast)
-    active_slots = [s for s in slots if s.get("duration_minutes", 0) > 0]
-    if not active_slots:
-        return {
-            "saved": False,
-            "status": "ok",
-            "should_irrigate": False,
-            "message": "All irrigation sessions skipped due to rain; nothing saved.",
-        }
-
-    field_name = field.nickname or f"Field {field.id}"
-    advice = format_advice_sentence(field_name, slots, True)
-
-    first_start_dt = datetime.fromisoformat(active_slots[0]["start"])
-
-    new_rec = models.Recommendation(
-        field_id=field.id,
-        advice_text=advice,
-        action="water",
-        water_at=to_utc(first_start_dt),
-        duration_minutes=pred.get("duration_minutes"),
-        source="ml",
-        status="pending",
-    )
-    db.add(new_rec)
-    db.commit()
-    db.refresh(new_rec)
-    return _rec_to_dict(new_rec)
+    return ensure_recommendation(db, field_id)

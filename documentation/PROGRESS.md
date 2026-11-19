@@ -548,6 +548,40 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 3. Connect login to backend so each farmer sees own fields
 4. LSTM, compare all three in MLflow
 
+---
+
+## Session 26: Weeks 3–4 (19 November 2026) — Real recommendations in the app
+
+- Home advice card is now a slider with one advice per field (needs water, needs a soil reading, no watering needed, done for today). Arrows, dots, "1 of N" counter, swipe and keyboard.
+- Plan page shows real time-slotted sessions grouped as Today and Tomorrow, times in IST, 0 minute slots hidden. Desktop schedule preview uses the same data.
+- Done works per session (field plus start time), stored in the browser for 3 days, and still posts the irrigation log to the backend.
+- Last saved plan shows with a "Last updated" line when the backend is unreachable.
+
+---
+
+## Session 27: Weeks 3–4 (19 November 2026) — Automatic recommendations
+
+- services/auto_recommend.py (ensure_recommendation) is shared by the generate endpoint and the hourly collector. Creates one recommendation per field when watering is needed, no duplicate within 6 hours, expires an open one when watering is no longer needed or all its sessions are in the past, never touches done ones.
+- A multi-session plan is saved as one row (first start time, total minutes).
+- recommendation_id is returned on each slot in /plan/today and /fields/{id}/recommendation. POST /irrigation-log with a recommendation id marks it done; an unknown id gives 404.
+
+### Known Gaps
+- The Done button in the app does not send recommendation_id yet.
+- Done on one session of a multi-session plan marks the whole recommendation done.
+- After Done, the soil reading may stay dry for a while, so a new recommendation might be created again. Watch this; add a pause after a Done log if it repeats.
+- Done state is stored per browser only.
+- Still open: fake login not connected to backend, fixed field location, no auth on sensor endpoints, rain of 5 mm or more always blocks watering, manual ALTER TABLE changes, moisture cut-offs 30/60 differ from ML limits, rain-fed fields with pumps in fake data, no cleanup of old collector data, two source columns in irrigation_logs, alerts and active alerts tile still sample data.
+
+### What's Next
+1. Done button sends recommendation_id
+2. Connect login to backend so each farmer sees own fields
+3. Real location for new fields
+4. Protect sensor endpoints
+5. Rain override rule and cleanup batch, database setup script
+6. LSTM, compare all three in MLflow
+7. Weeks 5-6: alerts, language and voice
+
+
 
 
 
