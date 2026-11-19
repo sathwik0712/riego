@@ -499,5 +499,55 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 3. Connect login to backend so each farmer sees own fields
 4. LSTM, compare all three in MLflow
 
+---
+
+## Session 22: Weeks 3–4 (19 November 2026) — Full-year fake data (month fix)
+
+### ML Engine
+- Fake data was only June-September but month is a feature. Now 365 days from 2026-01-01, 100 fields, 876,000 rows. All 12 months appear in train, val and test. True irrigate share 12.06%, logged 13.75%, flipped labels 19.3% of logged positives. Winter months need water more often than monsoon months. This replaces the Session 20 numbers.
+- Checked: overall soil moisture mean of 50% is from mixing crops (Mustard about 40%, Rice about 63%), not a bug.
+
+---
+
+## Session 23: Weeks 3–4 (19 November 2026) — moisture_gap feature and shared crop limits
+
+### ML Engine
+- backend/crop_targets.py holds the crop dry limits (approximate, mentor to confirm); generate_data.py imports it. Data hash unchanged.
+- New feature moisture_gap = soil moisture minus the stage lower limit (51 features). Importance is now scored by F1.
+- Best classifier HistGradientBoosting: threshold 0.77, test F1 0.665, PR-AUC 0.703, ROC-AUC 0.879. Duration error about 10 min on rows that need water (average baseline 40 min).
+
+---
+
+## Session 24: Weeks 3–4 (19 November 2026) — Serving step A (prediction)
+
+### ML Engine
+- backend/units.py converts guntas to acres (40 guntas = 1 acre). backend/ml/predict.py builds one live row, reuses features.py, scores with the saved models. GET /fields/{id}/prediction.
+- Readings older than 6 hours return status stale_reading; no reading returns not_enough_data; unknown field returns 404.
+- Time features use the UTC hour, same as training.
+- Tested: dry soil with no rain gives irrigate; forecast rain of 5 mm or more gives no irrigation; Rice needs water at a moisture where Wheat does not.
+
+---
+
+## Session 25: Weeks 3–4 (19 November 2026) — Serving step B (schedule optimizer)
+
+### ML Engine
+- backend/ml/scheduler.py: slots at 6 AM and 6 PM IST, sessions up to 60 min (long ones split), 48 hour horizon, 10 minute gap between fields of one farmer (same pump assumption).
+- Endpoints: GET /fields/{id}/recommendation, GET /plan/today, POST /fields/{id}/recommendation/generate (no duplicate within 6 hours).
+
+### Known Gaps
+- Rain of 5 mm or more always blocks irrigation, even for very dry soil. Ask the mentor about an override.
+- Rain days return a 0 minute slot; the app must hide it. Skipped sessions are not rescheduled.
+- Recommendations are only created when the generate endpoint is called; open ones never expire.
+- Frontend advice card and Plan page still use sample data.
+- Fake daily temperature peaks at 20:00 IST. Scores and threshold come from fake data only.
+- Still open from Session 21: fake login not connected to backend, fixed field location, no auth on sensor endpoints, manual ALTER TABLE changes, moisture cut-offs 30/60 differ from ML limits, rain-fed fields with pumps in fake data, no cleanup of old collector data, two source columns in irrigation_logs.
+
+### What's Next
+1. Show real recommendations in the app (advice card, Plan page)
+2. Create recommendations automatically (hourly collector)
+3. Connect login to backend so each farmer sees own fields
+4. LSTM, compare all three in MLflow
+
+
 
 
