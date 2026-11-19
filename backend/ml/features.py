@@ -17,6 +17,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Add backend directory so crop_targets can be imported
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from crop_targets import get_target_range  # noqa: E402
+
 # =========================================================================
 # CONSTANTS — fixed category lists ensure the same one-hot columns every run
 # =========================================================================
@@ -103,6 +110,18 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[df["never_irrigated"] == 1, "hours_since_last_irrigation"] = NEVER_IRRIGATED_HOURS
     df.loc[df["never_irrigated"] == 1, "last_irrigation_minutes"] = NEVER_IRRIGATED_LAST_MINUTES
     df.loc[df["never_irrigated"] == 1, "irrigation_minutes_last_7d"] = NEVER_IRRIGATED_7D_MINUTES
+
+    # moisture_gap = soil_moisture_pct - stage lower limit from crop_targets
+    # Computed before one-hot encoding, so crop and growth_stage columns still exist.
+    # If soil_moisture_pct is missing, moisture_gap stays NaN (filled with training median later).
+    df["moisture_gap"] = df.apply(
+        lambda row: (
+            row["soil_moisture_pct"] - get_target_range(row["crop"], row["growth_stage"])[0]
+            if not pd.isna(row["soil_moisture_pct"])
+            else float("nan")
+        ),
+        axis=1,
+    )
 
     return df
 

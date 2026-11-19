@@ -120,22 +120,24 @@ def get_feature_importances(
     feature_names: List[str],
     X_val: pd.DataFrame,
     y_val: np.ndarray,
+    scoring: str = "f1",
 ) -> pd.DataFrame:
-    """Extract top feature importances (tree importances or permutation)."""
-    if hasattr(model, "feature_importances_"):
-        importances = model.feature_importances_
-    else:
-        # Use permutation importance on a fast sample for HistGradientBoosting
-        sample_size = min(2000, len(X_val))
-        pi = permutation_importance(
-            model,
-            X_val.iloc[:sample_size],
-            y_val[:sample_size],
-            n_repeats=3,
-            random_state=42,
-            n_jobs=-1,
-        )
-        importances = pi.importances_mean
+    """Extract top feature importances using permutation importance.
+
+    Use scoring='f1' for classifiers and scoring='neg_mean_absolute_error'
+    for regressors.
+    """
+    sample_size = min(5000, len(X_val))
+    pi = permutation_importance(
+        model,
+        X_val.iloc[:sample_size],
+        y_val[:sample_size],
+        n_repeats=5,
+        random_state=42,
+        n_jobs=-1,
+        scoring=scoring,
+    )
+    importances = pi.importances_mean
 
     df_imp = pd.DataFrame({
         "feature": feature_names,
@@ -305,7 +307,7 @@ def main():
     rf_val_reg_mae = float(mean_absolute_error(y_val_reg, rf_reg.predict(X_val_reg)))
     rf_test_reg_mae = float(mean_absolute_error(y_test_reg, rf_reg.predict(X_test_reg)))
 
-    rf_reg_imp = get_feature_importances(rf_reg, feature_cols, X_val_reg, y_val_reg)
+    rf_reg_imp = get_feature_importances(rf_reg, feature_cols, X_val_reg, y_val_reg, scoring="neg_mean_absolute_error")
     rf_reg_imp_csv = MODELS_DIR / "rf_reg_top15_importances.csv"
     rf_reg_imp.head(15).to_csv(rf_reg_imp_csv, index=False)
 
@@ -327,7 +329,7 @@ def main():
     hgb_val_reg_mae = float(mean_absolute_error(y_val_reg, hgb_reg.predict(X_val_reg)))
     hgb_test_reg_mae = float(mean_absolute_error(y_test_reg, hgb_reg.predict(X_test_reg)))
 
-    hgb_reg_imp = get_feature_importances(hgb_reg, feature_cols, X_val_reg, y_val_reg)
+    hgb_reg_imp = get_feature_importances(hgb_reg, feature_cols, X_val_reg, y_val_reg, scoring="neg_mean_absolute_error")
     hgb_reg_imp_csv = MODELS_DIR / "hgb_reg_top15_importances.csv"
     hgb_reg_imp.head(15).to_csv(hgb_reg_imp_csv, index=False)
 

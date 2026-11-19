@@ -20,6 +20,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from crop_targets import CROP_TARGET_MOISTURE, DEFAULT_TARGET_MOISTURE, get_target_range
 from growth import CROP_GROWTH_STAGES, get_growth_stage
 from pump import HP_TO_FLOW_LPH, DEFAULT_FLOW_LPH
 
@@ -41,18 +42,6 @@ IRRIGATION_EFFICIENCY = {
     "Flood": 0.55,
 }
 
-# Target volumetric moisture ranges (%) by crop and growth stage: (lower_bound, upper_bound)
-CROP_TARGET_MOISTURE = {
-    "Wheat": {"Germination": (45.0, 65.0), "Vegetative": (50.0, 70.0), "Flowering": (55.0, 75.0), "Maturity": (40.0, 60.0)},
-    "Rice": {"Germination": (60.0, 80.0), "Vegetative": (70.0, 90.0), "Flowering": (75.0, 95.0), "Maturity": (60.0, 75.0)},
-    "Tomato": {"Germination": (50.0, 70.0), "Vegetative": (60.0, 80.0), "Flowering": (65.0, 85.0), "Maturity": (50.0, 70.0)},
-    "Maize": {"Germination": (45.0, 65.0), "Vegetative": (55.0, 75.0), "Flowering": (60.0, 80.0), "Maturity": (45.0, 65.0)},
-    "Cotton": {"Germination": (40.0, 60.0), "Vegetative": (50.0, 70.0), "Flowering": (55.0, 75.0), "Maturity": (40.0, 55.0)},
-    "Mustard": {"Germination": (40.0, 60.0), "Vegetative": (45.0, 65.0), "Flowering": (50.0, 70.0), "Maturity": (35.0, 50.0)},
-    "Sugarcane": {"Germination": (55.0, 75.0), "Vegetative": (65.0, 85.0), "Flowering": (70.0, 90.0), "Maturity": (55.0, 70.0)},
-    "Potato": {"Germination": (50.0, 70.0), "Vegetative": (60.0, 80.0), "Flowering": (65.0, 85.0), "Maturity": (50.0, 65.0)},
-}
-DEFAULT_TARGET_MOISTURE = (45.0, 65.0)
 NOT_SOWN_TARGET_MOISTURE = (30.0, 50.0)
 
 # Crop water consumption scale factor by developmental stage (relative evapotranspiration Kc)
@@ -237,6 +226,8 @@ def generate_synthetic_dataset(
     total_true_irrigate = 0
     total_logged_irrigate = 0
     total_flipped_positives = 0
+    monthly_steps: Dict[int, int] = {m: 0 for m in range(1, 13)}
+    monthly_true_irrigate: Dict[int, int] = {m: 0 for m in range(1, 13)}
 
     for field_idx in range(1, num_fields + 1):
         field_id = field_idx
@@ -448,8 +439,11 @@ def generate_synthetic_dataset(
 
             # 10. Noisy Ground-Truth Labels (Farmer Logging Delay/Omission)
             total_eval_steps += 1
+            curr_month = current_dt.month
+            monthly_steps[curr_month] += 1
             if true_irrigate_now == 1:
                 total_true_irrigate += 1
+                monthly_true_irrigate[curr_month] += 1
                 if rng.random() < LABEL_NOISE_ONE_TO_ZERO:
                     # Farmer forgot to tap Done -> logged as 0
                     logged_irrigate_now = 0
@@ -532,6 +526,12 @@ def generate_synthetic_dataset(
     print(f"  True decision == 1 share: {true_share:.4f} ({true_share*100:.2f}%) [{total_true_irrigate:,}/{total_eval_steps:,}]")
     print(f"  Logged decision == 1 share: {logged_share:.4f} ({logged_share*100:.2f}%) [{total_logged_irrigate:,}/{total_eval_steps:,}]")
     print(f"  Logged positives from flipped labels: {flipped_share:.4f} ({flipped_share*100:.2f}%) [{total_flipped_positives:,}/{total_logged_irrigate:,}]")
+    print("Monthly Diagnostics (Rows and True Irrigate Share):")
+    for m in range(1, 13):
+        m_rows = monthly_steps[m]
+        m_true = monthly_true_irrigate[m]
+        m_pct = (m_true / m_rows * 100.0) if m_rows > 0 else 0.0
+        print(f"  Month {m:02d}: {m_rows:,} rows | True Irrigate: {m_true:,} ({m_pct:.2f}%)")
 
     return df
 
@@ -548,9 +548,9 @@ def compute_file_hash(filepath: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Generate synthetic irrigation ML dataset.")
     parser.add_argument("--fields", type=int, default=100, help="Number of virtual fields (default: 100)")
-    parser.add_argument("--days", type=int, default=120, help="Number of days to simulate (default: 120)")
+    parser.add_argument("--days", type=int, default=365, help="Number of days to simulate (default: 365)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--start-date", type=str, default="2026-06-01", help="Simulation start date YYYY-MM-DD (default: 2026-06-01)")
+    parser.add_argument("--start-date", type=str, default="2026-01-01", help="Simulation start date YYYY-MM-DD (default: 2026-01-01)")
     parser.add_argument("--out", type=str, default="backend/ml/data/synthetic_training.csv", help="Output CSV path")
 
     args = parser.parse_args()
