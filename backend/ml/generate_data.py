@@ -57,23 +57,23 @@ NOT_SOWN_TARGET_MOISTURE = (30.0, 50.0)
 
 # Crop water consumption scale factor by developmental stage (relative evapotranspiration Kc)
 STAGE_EVAPO_FACTOR = {
-    "Not sown yet": 0.40,
-    "Germination": 0.50,
-    "Vegetative": 1.00,
-    "Flowering": 1.25,
-    "Maturity": 0.70,
+    "Not sown yet": 3.40,
+    "Germination": 4.25,
+    "Vegetative": 8.50,
+    "Flowering": 10.60,
+    "Maturity": 5.95,
 }
 
 # Soil drainage and retention characteristics
 SOIL_DRAINAGE_RATE = {
-    "Sandy": 0.040,  # Fast drainage
-    "Loamy": 0.020,  # Medium drainage
-    "Clay": 0.008,   # Slow drainage
+    "Sandy": 0.080,  # Fast drainage
+    "Loamy": 0.040,  # Medium drainage
+    "Clay": 0.016,   # Slow drainage
 }
 SOIL_RAIN_RETENTION_FACTOR = {
-    "Sandy": 0.55,   # % moisture gain per mm rain
-    "Loamy": 0.70,
-    "Clay": 0.85,
+    "Sandy": 0.22,   # % moisture gain per mm rain
+    "Loamy": 0.28,
+    "Clay": 0.35,
 }
 SOIL_FIELD_CAPACITY = {
     "Sandy": 50.0,
@@ -100,11 +100,11 @@ BASE_WIND_SPEED = 2.5           # Mean wind speed (m/s)
 
 # Monsoon rain simulation parameters
 MONSOON_MONTHS = {6, 7, 8, 9}
-MONSOON_RAIN_PROBABILITY = 0.08  # Hourly rain probability in monsoon
-DRY_RAIN_PROBABILITY = 0.015     # Hourly rain probability outside monsoon
-RAIN_CONTINUATION_PROB = 0.60    # Clustered event continuation chance
+MONSOON_RAIN_PROBABILITY = 0.020  # Hourly rain probability in monsoon
+DRY_RAIN_PROBABILITY = 0.005     # Hourly rain probability outside monsoon
+RAIN_CONTINUATION_PROB = 0.35    # Clustered event continuation chance
 RAIN_INTENSITY_SHAPE = 1.8       # Gamma distribution shape
-RAIN_INTENSITY_SCALE = 4.2       # Gamma distribution scale (avg ~7.5 mm/hr)
+RAIN_INTENSITY_SCALE = 2.5       # Gamma distribution scale
 
 # Sensor noise and missing data rates
 SENSOR_NOISE_STD = 0.7           # Gaussian telemetry noise on sensor readings
@@ -231,6 +231,12 @@ def generate_synthetic_dataset(
     flow_rate_options = list(HP_TO_FLOW_LPH.values())  # [5000, 9000, 18000, 27000, 45000]
 
     all_rows: List[Dict[str, Any]] = []
+
+    # Internal diagnostic tracking counters (column-free)
+    total_eval_steps = 0
+    total_true_irrigate = 0
+    total_logged_irrigate = 0
+    total_flipped_positives = 0
 
     for field_idx in range(1, num_fields + 1):
         field_id = field_idx
@@ -441,7 +447,9 @@ def generate_synthetic_dataset(
             row_rain: Optional[float] = cur_rain if rng.random() >= WEATHER_MISSING_RATE else None
 
             # 10. Noisy Ground-Truth Labels (Farmer Logging Delay/Omission)
+            total_eval_steps += 1
             if true_irrigate_now == 1:
+                total_true_irrigate += 1
                 if rng.random() < LABEL_NOISE_ONE_TO_ZERO:
                     # Farmer forgot to tap Done -> logged as 0
                     logged_irrigate_now = 0
@@ -454,9 +462,13 @@ def generate_synthetic_dataset(
                     # Unprompted extra watering
                     logged_irrigate_now = 1
                     logged_duration = int(rng.choice([15, 20, 30, 45, 60]))
+                    total_flipped_positives += 1
                 else:
                     logged_irrigate_now = 0
                     logged_duration = 0
+
+            if logged_irrigate_now == 1:
+                total_logged_irrigate += 1
 
             # Construct row dictionary
             row: Dict[str, Any] = {
@@ -507,6 +519,20 @@ def generate_synthetic_dataset(
     for col in nullable_int_cols:
         df[col] = df[col].astype("Int64")
 
+    # Diagnostic logging (column-free)
+    true_share = total_true_irrigate / total_eval_steps if total_eval_steps > 0 else 0.0
+    logged_share = total_logged_irrigate / total_eval_steps if total_eval_steps > 0 else 0.0
+    flipped_share = total_flipped_positives / total_logged_irrigate if total_logged_irrigate > 0 else 0.0
+    valid_moisture = df["soil_moisture_pct"].dropna()
+    m_mean = float(valid_moisture.mean())
+    p5, p50, p95 = np.percentile(valid_moisture, [5, 50, 95])
+
+    print("Generation Diagnostics:")
+    print(f"  Soil moisture (%): mean={m_mean:.2f}, 5th={p5:.2f}, 50th={p50:.2f}, 95th={p95:.2f}")
+    print(f"  True decision == 1 share: {true_share:.4f} ({true_share*100:.2f}%) [{total_true_irrigate:,}/{total_eval_steps:,}]")
+    print(f"  Logged decision == 1 share: {logged_share:.4f} ({logged_share*100:.2f}%) [{total_logged_irrigate:,}/{total_eval_steps:,}]")
+    print(f"  Logged positives from flipped labels: {flipped_share:.4f} ({flipped_share*100:.2f}%) [{total_flipped_positives:,}/{total_logged_irrigate:,}]")
+
     return df
 
 
@@ -521,7 +547,7 @@ def compute_file_hash(filepath: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Generate synthetic irrigation ML dataset.")
-    parser.add_argument("--fields", type=int, default=40, help="Number of virtual fields (default: 40)")
+    parser.add_argument("--fields", type=int, default=100, help="Number of virtual fields (default: 100)")
     parser.add_argument("--days", type=int, default=120, help="Number of days to simulate (default: 120)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--start-date", type=str, default="2026-06-01", help="Simulation start date YYYY-MM-DD (default: 2026-06-01)")

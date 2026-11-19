@@ -457,5 +457,47 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 2. Train and evaluate Random Forest, Gradient Boosting and LSTM, tracked with MLflow
 3. Schedule optimizer, FastAPI serving of recommendations
 
+---
+
+## Session 19: Weeks 3–4 (18–19 November 2026) — Feature Engineering
+
+### ML Engine
+- backend/ml/features.py turns synthetic_training.csv into train/val/test.csv, feature_columns.json (50 features) and imputation.json (training medians). Outputs are git-ignored.
+- Drops "Not sown yet" rows. Adds hour, month, hour sin/cos, missing flags, is_manual_reading, heavy_rain_forecast, never_irrigated, pump_flow_missing, plus one-hot columns.
+- Never irrigated: hours since irrigation = 999, minutes = 0 (fixed values, not medians).
+- Split by field (about 70/15/15), so no field is in two splits. Fixed seed gives identical files.
+
+---
+
+## Session 20: Weeks 3–4 (18–19 November 2026) — Bigger and Better Fake Data
+
+### ML Engine
+- Default fields 40 -> 100 (test set has 14 fields).
+- First models scored badly because soil rarely got dry (true irrigate share 0.8%, 81% of logged positives were flipped labels). Tuned evaporation, drainage and rain constants: soil moisture now 5-87%, true irrigate share 12.3%, logged 13.9%, flipped share 19%. Noise rates unchanged (8% and 3%).
+
+---
+
+## Session 21: Weeks 3–4 (18–19 November 2026) — Train and Compare Tabular Models (MLflow)
+
+### ML Engine
+- backend/ml/train_tabular.py: Random Forest and HistGradientBoosting for irrigate_now and duration, tracked in local MLflow (backend/ml/mlruns, experiment riego-irrigation). Threshold chosen on validation only. Best models saved in backend/ml/models (git-ignored).
+- Classifier (test): best is HistGradientBoosting, F1 0.51, PR-AUC 0.54, ROC-AUC 0.82. Both baselines (always 0, moisture below 35) score about 0 F1.
+- Duration (test, rows that need water): error about 12 min vs 33 min for the average baseline. Combined error on all rows about 4 min.
+- Labels are noisy on purpose, so F1 around 0.5-0.6 is expected.
+
+### Known Gaps
+- Fake data covers only June-September but month is a feature. Fix: full-year data.
+- Guntas vs acres: model uses acres; serving must convert (40 guntas = 1 acre).
+- features.py works on files; serving needs a one-row version with the same columns, medians and threshold.
+- Scores and threshold come from fake data only.
+- Still open: fake login not connected to backend, fixed field location, no auth on sensor endpoints, manual ALTER TABLE changes (no migration tool), moisture cut-offs 30/60 differ from ML limits, rain-fed fields with pumps in fake data, no cleanup of old collector data, two source columns in irrigation_logs.
+- Session 18 numbers (40 fields, 3.78%) are replaced by Session 20.
+
+### What's Next
+1. Full-year fake data, retrain
+2. Schedule optimizer and FastAPI serving (with guntas conversion), then show in the app
+3. Connect login to backend so each farmer sees own fields
+4. LSTM, compare all three in MLflow
+
 
 

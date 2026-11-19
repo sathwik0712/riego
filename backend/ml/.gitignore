@@ -1,2 +1,4 @@
-# Ignore generated synthetic datasets
+# Ignore generated synthetic datasets and MLflow/model artifacts
 data/
+mlruns/
+models/
