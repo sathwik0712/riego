@@ -17,7 +17,8 @@ import {
   waterSourceOptions,
 } from "../lib/sampleData";
 import { createField } from "../lib/api";
-import { AlertIcon, CheckIcon, HelpCircleIcon, ZapIcon } from "./icons";
+import { AlertIcon, CheckIcon, HelpCircleIcon, ZapIcon, MapPinIcon } from "./icons";
+import LocationPicker from "./LocationPicker";
 
 // Step titles and icons for the progress indicator
 const STEP_CONFIG = [
@@ -107,8 +108,14 @@ export default function FieldRegistrationForm() {
 
   // Screen 1: Field basics
   const validateScreen1 = (): boolean => {
-    if (!formData.location.trim()) {
-      setErrorMessage("Please choose a location (Current GPS or Map) to continue.");
+    if (
+      !formData.location.trim() ||
+      formData.latitude === null ||
+      formData.latitude === undefined ||
+      formData.longitude === null ||
+      formData.longitude === undefined
+    ) {
+      setErrorMessage("Please choose a location (Use GPS or search a place) to continue.");
       return false;
     }
     if (formData.areaSize === "" || Number(formData.areaSize) <= 0) {
@@ -203,8 +210,15 @@ export default function FieldRegistrationForm() {
     setSaveError(null);
 
     try {
-      // 1. Coordinates: parse from location string or fallback to default coordinates
-      const coords = parseCoordinates(formData.location);
+      // 1. Coordinates: use real selected coordinates (or fallback parse if needed)
+      const latitude =
+        formData.latitude !== null && formData.latitude !== undefined
+          ? formData.latitude
+          : parseCoordinates(formData.location).latitude;
+      const longitude =
+        formData.longitude !== null && formData.longitude !== undefined
+          ? formData.longitude
+          : parseCoordinates(formData.location).longitude;
 
       // 2. Map water source to allowed backend enum ("Borewell" | "Canal" | "Tank" | "Rain-fed")
       const waterSource = mapWaterSource(formData.waterSource);
@@ -229,11 +243,11 @@ export default function FieldRegistrationForm() {
       const hasSensor = Boolean(formData.hasSensor);
       const deviceId = hasSensor && formData.deviceId.trim() ? formData.deviceId.trim() : null;
 
-      // 6. Farmer: uses seeded farmer "farmer_001" for now; will use logged-in farmer when real login is connected
+      // 6. Farmer: inferred by backend from token
       const payload: FieldCreateData = {
         nickname: formData.nickname.trim() || null,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
+        latitude,
+        longitude,
         area: Number(formData.areaSize),
         area_unit: formData.areaUnit,
         crop: formData.cropName.trim(),
@@ -500,7 +514,7 @@ export default function FieldRegistrationForm() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <label className="text-sm font-extrabold text-[#1B2D21] flex items-center gap-2">
-                <span>📍</span>
+                <MapPinIcon className="w-4 h-4 text-[#235334]" />
                 <span>Field Location</span>
               </label>
               <span className="text-xs font-bold text-[#C53030] bg-[#FDF2F2] px-2 py-0.5 rounded-full border border-[#FCA5A5]">
@@ -508,80 +522,31 @@ export default function FieldRegistrationForm() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
-              <button
-                type="button"
-                onClick={() =>
-                  updateField("location", "Current GPS (13.0827° N, 77.5877° E)")
+            <LocationPicker
+              value={
+                formData.latitude !== null &&
+                formData.latitude !== undefined &&
+                formData.longitude !== null &&
+                formData.longitude !== undefined
+                  ? {
+                      latitude: formData.latitude,
+                      longitude: formData.longitude,
+                      placeName: formData.location,
+                    }
+                  : null
+              }
+              onChange={(val) => {
+                if (val) {
+                  updateField("location", val.placeName || "");
+                  updateField("latitude", val.latitude);
+                  updateField("longitude", val.longitude);
+                } else {
+                  updateField("location", "");
+                  updateField("latitude", null);
+                  updateField("longitude", null);
                 }
-                className={`min-h-[56px] p-4 rounded-2xl border-2 flex flex-col items-start justify-center text-left transition-all cursor-pointer ${
-                  formData.location.includes("GPS")
-                    ? "border-[#235334] bg-[#EAF5EB] shadow-sm"
-                    : "border-[#DCD6C0] bg-white hover:bg-[#FAF7EE]"
-                }`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl" aria-hidden="true">📍</span>
-                    <span className="font-extrabold text-sm sm:text-base text-[#1B2D21]">
-                      Use My GPS
-                    </span>
-                  </div>
-                  {formData.location.includes("GPS") && (
-                    <span className="text-xs font-bold text-[#2E7D32] bg-white px-2 py-0.5 rounded-full border border-[#A3D9A5]">
-                      ✓ Selected
-                    </span>
-                  )}
-                </div>
-                <span className="text-xs text-[#5F6E62] mt-1">
-                  Automatic GPS coordinates
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  updateField("location", "Map Pin (Plot #12, North Gate)")
-                }
-                className={`min-h-[56px] p-4 rounded-2xl border-2 flex flex-col items-start justify-center text-left transition-all cursor-pointer ${
-                  formData.location.includes("Map")
-                    ? "border-[#235334] bg-[#EAF5EB] shadow-sm"
-                    : "border-[#DCD6C0] bg-white hover:bg-[#FAF7EE]"
-                }`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl" aria-hidden="true">🗺️</span>
-                    <span className="font-extrabold text-sm sm:text-base text-[#1B2D21]">
-                      Pick on Map
-                    </span>
-                  </div>
-                  {formData.location.includes("Map") && (
-                    <span className="text-xs font-bold text-[#2E7D32] bg-white px-2 py-0.5 rounded-full border border-[#A3D9A5]">
-                      ✓ Selected
-                    </span>
-                  )}
-                </div>
-                <span className="text-xs text-[#5F6E62] mt-1">
-                  Tap to place pin on map
-                </span>
-              </button>
-            </div>
-
-            {formData.location && (
-              <div className="mt-2 p-3 rounded-2xl bg-[#EAF5EB] border border-[#A3D9A5] flex items-center justify-between text-xs sm:text-sm">
-                <span className="font-bold text-[#235334]">
-                  📌 Recorded: {formData.location}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateField("location", "")}
-                  className="text-xs font-bold text-[#5F6E62] underline hover:text-[#1B2D21] ml-2"
-                >
-                  Change
-                </button>
-              </div>
-            )}
+              }}
+            />
           </div>
 
           {/* 4. Field Area (Required) */}
@@ -1314,7 +1279,12 @@ export default function FieldRegistrationForm() {
               </div>
               <div>
                 <span className="text-[#5F6E62]">Location:</span>{" "}
-                <strong className="text-[#1B2D21]">{formData.location}</strong>
+                <strong className="text-[#1B2D21]">{formData.location || "Not chosen"}</strong>
+                {formData.latitude !== null && formData.latitude !== undefined && formData.longitude !== null && formData.longitude !== undefined && (
+                  <span className="block text-xs font-mono text-[#5F6E62] mt-0.5">
+                    {formData.latitude.toFixed(4)}°, {formData.longitude.toFixed(4)}°
+                  </span>
+                )}
               </div>
               <div>
                 <span className="text-[#5F6E62]">Area Size:</span>{" "}

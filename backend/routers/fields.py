@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 import models
-from schemas import FieldCreate, FieldOut, ManualReadingCreate, ManualReadingOut
+from schemas import FieldCreate, FieldOut, ManualReadingCreate, ManualReadingOut, FieldLocationUpdate
 from services.sensor import get_field_latest_sensor_reading, STALE_AFTER_MINUTES
 from services.conditions import get_field_conditions
 from pump import resolve_pump_flow
@@ -220,3 +220,30 @@ def get_field_prediction(
             detail=f"Field with ID {field_id} not found.",
         )
     return predict_for_field(db, field_id)
+
+
+# Update field location (latitude and longitude)
+@router.patch("/{field_id}/location", response_model=FieldOut)
+def update_field_location(
+    field_id: int,
+    loc_in: FieldLocationUpdate,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    """
+    Update the latitude and longitude of an existing field.
+    Only the field's owner can update its location (returns 404 for another farmer's field).
+    """
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field or field.farmer_id != current_farmer.farmer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Field with ID {field_id} not found."
+        )
+
+    field.latitude = loc_in.latitude
+    field.longitude = loc_in.longitude
+    db.commit()
+    db.refresh(field)
+    return field
+

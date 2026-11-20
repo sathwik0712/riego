@@ -124,7 +124,9 @@ export interface FieldFormData {
 
   // Screen 1: Field basics
   nickname: string; // Optional nickname, e.g. "North field"
-  location: string; // Required, e.g. "Current GPS: 13.0827° N, 77.5877° E"
+  location: string; // Required place name or description, e.g. "Near Hyderabad, Telangana"
+  latitude?: number | null; // Real latitude
+  longitude?: number | null; // Real longitude
   areaSize: number | ""; // Required number, e.g. 2.5
   areaUnit: "acres" | "guntas"; // Required unit
 
@@ -329,4 +331,23 @@ export interface FieldRecommendation {
   advice_text?: string;
   slots?: PlanSlot[];
 }
+
+// -------------------------------------------------------------
+// Geocoding and Location schemas
+// -------------------------------------------------------------
+
+export interface PlaceResult {
+  name: string;
+  state: string;
+  country: string;
+  lat: number;
+  lon: number;
+}
+
+export interface ReversePlaceResult {
+  name: string;
+  state: string;
+  country: string;
+}
+
 

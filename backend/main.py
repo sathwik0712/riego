@@ -12,6 +12,7 @@ from routers.auth import router as auth_router
 from routers.weather import router as weather_router
 from routers.recommendations import router as recommendations_router
 from routers.irrigation_log import router as irrigation_log_router
+from routers.geo import router as geo_router
 
 # Lifespan event handler to create tables, seed data, and set up hypertable
 @asynccontextmanager
@@ -90,6 +91,7 @@ app.include_router(auth_router)
 app.include_router(weather_router)
 app.include_router(recommendations_router)
 app.include_router(irrigation_log_router)
+app.include_router(geo_router)
 
 # Health check route
 @app.get("/health")

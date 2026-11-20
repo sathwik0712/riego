@@ -5,7 +5,7 @@
 import { STRINGS } from "../lib/strings";
 import { Field, BackendField, FieldConditions } from "../lib/types";
 import { getFieldMoistureDisplay, timeAgo } from "../lib/fieldStatus";
-import { ClockIcon, EditIcon } from "./icons";
+import { ClockIcon, EditIcon, MapPinIcon, AlertIcon } from "./icons";
 import Sparkline from "./Sparkline";
 
 interface FieldCardProps {
@@ -15,7 +15,9 @@ interface FieldCardProps {
   // 7-day daily averages for the sparkline trend (one number per day, oldest first)
   // Undefined or fewer than 2 points → shows "Not enough data yet"
   trendData?: number[];
+  placeName?: string | null;
   onEnterReading?: (field: Field | BackendField) => void;
+  onChangeLocation?: (field: BackendField) => void;
 }
 
 // Format sowing date as "14 Oct 2026"
@@ -39,10 +41,18 @@ export default function FieldCard({
   conditions,
   conditionsError,
   trendData,
+  placeName,
   onEnterReading,
+  onChangeLocation,
 }: FieldCardProps) {
   // Determine if this is a real BackendField or legacy mock Field
   const isBackend = "latitude" in field || "registered_at" in field;
+
+  // Check if field is still on the legacy placeholder coordinates (13.0827, 77.5877)
+  const isPlaceholderLocation =
+    isBackend &&
+    Math.abs((field as BackendField).latitude - 13.0827) < 0.0001 &&
+    Math.abs((field as BackendField).longitude - 77.5877) < 0.0001;
   
   // Field display metadata
   const fieldName = (isBackend && (field as BackendField).nickname?.trim())
@@ -114,17 +124,28 @@ export default function FieldCard({
       <div>
         {/* Header: Field Name, Crop, and Status Badges */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-[#FAF7EE] border border-[#DCD6C0] flex items-center justify-center text-sm font-bold text-[#235334] shrink-0">
               {String(field.id).slice(-3)}
             </div>
-            <div>
-              <h3 className="text-xl font-semibold text-[#1B2D21] leading-tight">
+            <div className="min-w-0">
+              <h3 className="text-xl font-semibold text-[#1B2D21] leading-tight truncate">
                 {fieldName}
               </h3>
               <p className="text-sm text-[#5F6E62] mt-0.5">
                 {crop}
               </p>
+              {isPlaceholderLocation ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FEF3C7] border border-[#FCD34D] text-[#92400E] text-xs font-semibold mt-1.5">
+                  <AlertIcon className="w-3.5 h-3.5 text-[#92400E] shrink-0" />
+                  <span>Location not set</span>
+                </div>
+              ) : placeName ? (
+                <div className="flex items-center gap-1 text-xs text-[#5F6E62] mt-1 truncate">
+                  <MapPinIcon className="w-3.5 h-3.5 text-[#5F6E62] shrink-0" />
+                  <span className="truncate">{placeName}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -269,17 +290,30 @@ export default function FieldCard({
         </div>
       </div>
 
-      {/* ── Fields page action: Enter reading button (>=56px tall) ── */}
-      {onEnterReading && (
-        <div className="pt-4 mt-4 border-t border-[#F2EFE4]">
-          <button
-            type="button"
-            onClick={() => onEnterReading(field)}
-            className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
-          >
-            <EditIcon className="w-5 h-5 text-[#235334]" />
-            <span>Enter reading</span>
-          </button>
+      {/* ── Fields page action: Change location & Enter reading buttons (>=56px tall) ── */}
+      {(onEnterReading || (onChangeLocation && isBackend)) && (
+        <div className="pt-4 mt-4 border-t border-[#F2EFE4] flex flex-col gap-2.5">
+          {onChangeLocation && isBackend && (
+            <button
+              type="button"
+              onClick={() => onChangeLocation(field as BackendField)}
+              className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <MapPinIcon className="w-5 h-5 text-[#235334]" />
+              <span>Change location</span>
+            </button>
+          )}
+
+          {onEnterReading && (
+            <button
+              type="button"
+              onClick={() => onEnterReading(field)}
+              className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <EditIcon className="w-5 h-5 text-[#235334]" />
+              <span>Enter reading</span>
+            </button>
+          )}
         </div>
       )}
     </article>

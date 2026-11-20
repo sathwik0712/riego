@@ -210,6 +210,29 @@ class FieldOut(FieldCreate):
             return values
 
 
+# Schema for updating field location
+class FieldLocationUpdate(BaseModel):
+    latitude: float
+    longitude: float
+
+    # Latitude between -90 and 90
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v):
+        if v < -90 or v > 90:
+            raise ValueError("Latitude must be between -90 and 90")
+        return v
+
+    # Longitude between -180 and 180
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v):
+        if v < -180 or v > 180:
+            raise ValueError("Longitude must be between -180 and 180")
+        return v
+
+
+
 # Schema for incoming sensor readings
 class SensorReadingCreate(BaseModel):
     device_id: str

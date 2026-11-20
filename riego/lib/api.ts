@@ -24,7 +24,11 @@ import {
   PlanSlot,
   ScheduleItem,
   SensorHistoryResponse,
+  PlaceResult,
+  ReversePlaceResult,
 } from "./types";
+
+export type { PlaceResult, ReversePlaceResult };
 
 // Base API address from environment variable (falls back to local FastAPI backend)
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -166,6 +170,14 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+// Send a PATCH request with JSON body to the backend
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PATCH",
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 }
@@ -384,3 +396,36 @@ export async function getRecentAlerts(): Promise<Alert[]> {
   // Sample alerts — connects to alert engine in a later step
   return sampleAlerts;
 }
+
+// ----------------------------------------------------------------------------
+// Geocoding and Location APIs
+// ----------------------------------------------------------------------------
+
+/** Search places by name query (2 to 80 characters). Returns up to 5 places. */
+export async function searchPlaces(q: string): Promise<PlaceResult[]> {
+  const trimmed = q.trim();
+  if (trimmed.length < 2) return [];
+  return apiGet<PlaceResult[]>(`/geo/search?q=${encodeURIComponent(trimmed)}`);
+}
+
+/** Reverse geocode coordinates to place details (name, state, country). */
+export async function reversePlace(lat: number, lon: number): Promise<ReversePlaceResult | null> {
+  const res = await apiGet<ReversePlaceResult | ReversePlaceResult[]>(`/geo/reverse?lat=${lat}&lon=${lon}`);
+  if (!res || (Array.isArray(res) && res.length === 0)) {
+    return null;
+  }
+  return Array.isArray(res) ? res[0] : res;
+}
+
+/** Update the latitude and longitude of an existing field. */
+export async function updateFieldLocation(
+  fieldId: number,
+  lat: number,
+  lon: number
+): Promise<BackendField> {
+  return apiPatch<BackendField>(`/fields/${fieldId}/location`, {
+    latitude: lat,
+    longitude: lon,
+  });
+}
+

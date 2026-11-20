@@ -6,7 +6,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { getFields, getFieldConditions, getSensorHistory } from "@/lib/api";
+import {
+  getFields,
+  getFieldConditions,
+  getSensorHistory,
+  updateFieldLocation,
+  reversePlace,
+} from "@/lib/api";
 import { BackendField, FieldConditions } from "@/lib/types";
 import { calculateDailyAverages } from "@/lib/fieldStatus";
 import { STRINGS } from "@/lib/strings";
@@ -14,6 +20,11 @@ import FieldCard from "@/components/FieldCard";
 import LoadingCard from "@/components/LoadingCard";
 import ErrorNotice from "@/components/ErrorNotice";
 import ManualReadingModal from "@/components/ManualReadingModal";
+import LocationPicker, { LocationValue } from "@/components/LocationPicker";
+import { CloseIcon, AlertIcon } from "@/components/icons";
+
+// In-memory cache for reverse-geocoded place names so we do not repeatedly call the API
+const placeNameCache: Record<number, string> = {};
 
 interface FieldItem {
   field: BackendField;
@@ -28,12 +39,45 @@ export default function FieldsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedFieldForReading, setSelectedFieldForReading] = useState<BackendField | null>(null);
 
+  // Place names for fields: field.id -> string
+  const [placeNames, setPlaceNames] = useState<Record<number, string>>({});
+
+  // Location modal state
+  const [selectedFieldForLocation, setSelectedFieldForLocation] = useState<BackendField | null>(null);
+  const [newLocation, setNewLocation] = useState<LocationValue | null>(null);
+  const [savingLocation, setSavingLocation] = useState<boolean>(false);
+  const [locationModalError, setLocationModalError] = useState<string | null>(null);
+
   const loadFieldsData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       // 1. Fetch real fields from backend
       const fields = await getFields();
+
+      // Fetch place names for fields with non-placeholder coordinates (quietly in the background)
+      fields.forEach(async (f) => {
+        const isPlaceholder =
+          Math.abs(f.latitude - 13.0827) < 0.0001 &&
+          Math.abs(f.longitude - 77.5877) < 0.0001;
+        if (isPlaceholder) return;
+
+        if (placeNameCache[f.id]) {
+          setPlaceNames((prev) => ({ ...prev, [f.id]: placeNameCache[f.id] }));
+          return;
+        }
+
+        try {
+          const res = await reversePlace(f.latitude, f.longitude);
+          if (res && res.name) {
+            const label = res.state ? `Near ${res.name}, ${res.state}` : `Near ${res.name}`;
+            placeNameCache[f.id] = label;
+            setPlaceNames((prev) => ({ ...prev, [f.id]: label }));
+          }
+        } catch {
+          // Skip quietly on failure
+        }
+      });
 
       // 2. Fetch conditions and 7-day sensor history for each field in parallel
       const [conditionsResults, historyResults] = await Promise.all([
@@ -115,6 +159,78 @@ export default function FieldsPage() {
       );
     } catch {
       // Ignore background refresh errors
+    }
+  };
+
+  const handleOpenLocationModal = (field: BackendField) => {
+    setSelectedFieldForLocation(field);
+    setLocationModalError(null);
+
+    const isPlaceholder =
+      Math.abs(field.latitude - 13.0827) < 0.0001 &&
+      Math.abs(field.longitude - 77.5877) < 0.0001;
+
+    if (isPlaceholder) {
+      setNewLocation(null);
+    } else {
+      setNewLocation({
+        latitude: field.latitude,
+        longitude: field.longitude,
+        placeName: placeNames[field.id] || "",
+      });
+    }
+  };
+
+  const handleCloseLocationModal = () => {
+    if (savingLocation) return;
+    setSelectedFieldForLocation(null);
+    setNewLocation(null);
+    setLocationModalError(null);
+  };
+
+  const handleSaveLocation = async () => {
+    if (!selectedFieldForLocation) return;
+    if (!newLocation || newLocation.latitude == null || newLocation.longitude == null) {
+      setLocationModalError("Please select or search for a location first.");
+      return;
+    }
+
+    setSavingLocation(true);
+    setLocationModalError(null);
+    try {
+      await updateFieldLocation(
+        selectedFieldForLocation.id,
+        newLocation.latitude,
+        newLocation.longitude
+      );
+
+      // Update in-memory place name cache if placeName was resolved
+      if (newLocation.placeName) {
+        placeNameCache[selectedFieldForLocation.id] = newLocation.placeName;
+        setPlaceNames((prev) => ({
+          ...prev,
+          [selectedFieldForLocation.id]: newLocation.placeName!,
+        }));
+      }
+
+      // Clear dashboard cache so dashboard re-fetches fresh weather
+      try {
+        localStorage.removeItem("riego_dashboard_v1");
+      } catch {
+        // ignore
+      }
+
+      setSelectedFieldForLocation(null);
+      setNewLocation(null);
+
+      // Reload fields data to reflect new coordinates and weather
+      await loadFieldsData();
+    } catch (err: any) {
+      setLocationModalError(
+        err?.message || "Could not save the location. Check your connection and try again."
+      );
+    } finally {
+      setSavingLocation(false);
     }
   };
 
@@ -202,7 +318,9 @@ export default function FieldsPage() {
                 conditions={conditions}
                 conditionsError={conditionsError}
                 trendData={trendData}
+                placeName={placeNames[field.id]}
                 onEnterReading={(f) => setSelectedFieldForReading(f as BackendField)}
+                onChangeLocation={(f) => handleOpenLocationModal(f)}
               />
             ))}
 
@@ -240,6 +358,78 @@ export default function FieldsPage() {
           onClose={() => setSelectedFieldForReading(null)}
           onSaved={() => handleFieldReadingSaved(selectedFieldForReading.id)}
         />
+      )}
+
+      {/* Change field location modal / bottom sheet */}
+      {selectedFieldForLocation && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="location-modal-title"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full max-h-[90vh] rounded-t-3xl sm:rounded-3xl sm:max-w-lg bg-white p-5 sm:p-7 shadow-xl border border-[#DCD6C0] overflow-y-auto flex flex-col gap-5">
+            {/* Modal header */}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="location-modal-title" className="text-xl font-extrabold text-[#1B2D21]">
+                  Change field location
+                </h2>
+                <p className="text-sm text-[#5F6E62] mt-1">
+                  Updating coordinates updates weather forecasts and irrigation advice for{" "}
+                  <span className="font-semibold text-[#1B2D21]">
+                    {selectedFieldForLocation.nickname || `Field ${selectedFieldForLocation.id}`}
+                  </span>
+                  .
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseLocationModal}
+                disabled={savingLocation}
+                className="w-10 h-10 rounded-xl bg-[#FAF7EE] border border-[#DCD6C0] flex items-center justify-center text-[#5F6E62] hover:text-[#1B2D21] hover:bg-[#F2EDDC] transition-all cursor-pointer shrink-0"
+                aria-label="Close dialog"
+              >
+                <CloseIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Location Picker */}
+            <LocationPicker
+              value={newLocation}
+              onChange={(val) => {
+                setNewLocation(val);
+                setLocationModalError(null);
+              }}
+              error={locationModalError}
+            />
+
+            {/* Action buttons (>=56px tall) */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleSaveLocation}
+                disabled={savingLocation}
+                className="min-h-[56px] w-full rounded-2xl bg-[#235334] text-[#FAF7EE] font-bold text-base hover:bg-[#1A3E27] active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {savingLocation ? (
+                  <span>Saving location...</span>
+                ) : (
+                  <span>Save location</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCloseLocationModal}
+                disabled={savingLocation}
+                className="min-h-[56px] w-full sm:w-auto sm:px-6 rounded-2xl bg-[#FAF7EE] text-[#1B2D21] font-bold text-base border border-[#DCD6C0] hover:bg-[#F2EDDC] active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

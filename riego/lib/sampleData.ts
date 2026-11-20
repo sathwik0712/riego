@@ -208,6 +208,8 @@ export const initialFieldFormData: FieldFormData = {
   growthStage: "Vegetative",
   nickname: "",
   location: "",
+  latitude: null,
+  longitude: null,
   areaSize: "",
   areaUnit: "acres",
   cropName: "",
