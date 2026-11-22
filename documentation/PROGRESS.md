@@ -581,6 +581,42 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 6. LSTM, compare all three in MLflow
 7. Weeks 5-6: alerts, language and voice
 
+---
+
+## Session 28: Weeks 3-4 (19 November 2026) - Real login and per-farmer data
+- New table auth_tokens. Login and signup return a random token; only its SHA-256 hash is stored; tokens last 30 days and survive a server restart. Added POST /auth/logout. The OTP is still fake (123456).
+- get_current_farmer reads the Bearer token (missing or bad token gives 401). All farmer-owned endpoints are protected; another farmer's field gives 404. POST /fields uses the logged-in farmer. /plan/today uses the token's farmer.
+- Not protected: /health, /auth endpoints, POST /sensor-readings and GET /sensor-readings/{device_id}.
+- Frontend: signup, login and logout call the backend. Token sent with every request. A 401 clears the session and goes to /login with a short message. If the backend is unreachable, the farmer stays logged in and sees saved data. All saved data in the browser is cleared on login and logout so farmers never see each other's data.
+- /docs now has an Authorize button (HTTPBearer).
+
+---
+
+## Session 29: Weeks 3-4 (19-20 November 2026) - Real field locations
+- services/geocode.py and routers/geo.py use the OpenWeatherMap Geo API (place search and reverse lookup, 1 hour cache). New PATCH /fields/{id}/location.
+- Field form uses a LocationPicker: current location (GPS) or place search, with a "Near Hyderabad, Telangana" confirmation. The fake map placeholder and fixed coordinates are gone.
+- Fields page has "Change location" on each card, shows the place name, and flags old placeholder locations as "Location not set". Tested: moving a field from Hyderabad to Vijayawada changes its weather.
+
+---
+
+## Session 30: Weeks 3-4 (20 November 2026) - Done button linked to recommendations
+- Done now sends event_source farmer_tap, irrigated_at and recommendation_id. For a multi-session plan, recommendation_id is sent only with the last session, so the recommendation closes when the last session is done. If the backend answers 404 or 422 (for example it expired), Done retries without the id so it always works. The plan reloads after Done.
+
+### Known Gaps
+- Done state per session is stored in the browser only.
+- Done on a multi-session plan closes the recommendation only at the last session.
+- OTP is still fake; tokens are not removed when they expire.
+- Sensor endpoints (POST /sensor-readings) still accept any device ID.
+- Still open: rain of 5 mm or more always blocks watering, manual ALTER TABLE changes (no setup script), moisture cut-offs 30/60 differ from ML limits, rain-fed fields with pumps in fake data, no cleanup of old collector data, two source columns in irrigation_logs, alerts and active alerts tile still sample data, LSTM not done.
+
+### What's Next
+1. Protect sensor endpoints (registered devices only)
+2. Rain override rule and cleanup batch
+3. Database setup script
+4. LSTM, compare all three models in MLflow
+5. Weeks 5-6: alerts, language and voice, field detail page, reports, deployment
+
+
 
 
 

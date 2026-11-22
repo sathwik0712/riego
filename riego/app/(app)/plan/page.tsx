@@ -69,9 +69,10 @@ function parseSlotKey(itemId: string): { fieldId: number; slotStart: string } | 
   return null; // Not used; we store slotStart on the ScheduleItem via a custom field.
 }
 
-// Extend ScheduleItem with the raw slotStart for cache key lookup.
+// Extend ScheduleItem with the raw slotStart for cache key lookup and recommendationId.
 interface SlottedItem extends ScheduleItem {
   slotStart: string; // raw ISO from the backend slot
+  recommendationId?: number | null;
 }
 
 export default function PlanPage() {
@@ -125,6 +126,7 @@ export default function PlanPage() {
           fieldId: slot.field_id,
           fieldName,
           slotStart: slot.start,
+          recommendationId: slot.recommendation_id ?? null,
           time: formatTimeIST(slot.start),
           durationMinutes: slot.duration_minutes,
           done: Boolean(doneAt),
@@ -174,6 +176,7 @@ export default function PlanPage() {
             fieldId: slot.field_id,
             fieldName,
             slotStart: slot.start,
+            recommendationId: slot.recommendation_id ?? null,
             time: formatTimeIST(slot.start),
             durationMinutes: slot.duration_minutes,
             done: Boolean(doneAt),
@@ -203,7 +206,12 @@ export default function PlanPage() {
   }, [loadPlanData]);
 
   const handleDone = async (item: SlottedItem) => {
+    // Prevent double taps or concurrent submissions
     if (savingMap[item.id]) return;
+    const fieldNumId = Number(item.fieldId);
+    // Never mark a session done twice or send a second log for the same session
+    if (item.done || (fieldNumId && getSessionDoneAt(fieldNumId, item.slotStart))) return;
+
     setErrorMap((prev) => ({ ...prev, [item.id]: null }));
 
     const matched = findMatchedField(item, fields);
@@ -218,7 +226,31 @@ export default function PlanPage() {
     setSavingMap((prev) => ({ ...prev, [item.id]: true }));
 
     try {
-      const saved = await logIrrigation(matched.id, item.durationMinutes);
+      // Rule for recommendation_id:
+      // Send it ONLY if the slot has recommendationId AND it is the LAST not-done session with that recommendationId.
+      let recIdToSend: number | null = null;
+      if (item.recommendationId) {
+        const allItems = [...todayItems, ...tomorrowItems];
+        const otherNotDoneExists = allItems.some((other) => {
+          // Skip the current session
+          if (other.fieldId === item.fieldId && other.slotStart === item.slotStart) {
+            return false;
+          }
+          if (other.recommendationId !== item.recommendationId) {
+            return false;
+          }
+          const otherFieldId = Number(other.fieldId);
+          const isDone =
+            other.done || (otherFieldId ? Boolean(getSessionDoneAt(otherFieldId, other.slotStart)) : false);
+          return !isDone;
+        });
+
+        if (!otherNotDoneExists) {
+          recIdToSend = item.recommendationId;
+        }
+      }
+
+      const saved = await logIrrigation(matched.id, item.durationMinutes, recIdToSend);
       const timeStr = formatTimeIST(saved.started_at);
 
       // Persist this specific session as done (keyed by fieldId + slotStart)
@@ -231,6 +263,9 @@ export default function PlanPage() {
         );
       setTodayItems(updateList);
       setTomorrowItems(updateList);
+
+      // Reload plan so the card and Home advice update
+      await loadPlanData();
     } catch (err: any) {
       setErrorMap((prev) => ({
         ...prev,

@@ -2,7 +2,8 @@ import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sql_func
 from database import get_db
@@ -10,6 +11,9 @@ import models
 from schemas import SignupRequest, OTPRequest, OTPVerify, FarmerOut
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+# HTTPBearer security scheme for Swagger UI Authorize button
+security = HTTPBearer(auto_error=False)
 
 # --- Placeholder OTP (replace with Twilio SMS later) ---
 FAKE_OTP = "123456"
@@ -50,16 +54,16 @@ def _generate_farmer_id(db: Session) -> str:
 
 
 def get_current_farmer(
-    authorization: Optional[str] = Header(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> models.Farmer:
     """Extract and validate bearer token, return farmer or raise 401 with plain message."""
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid authorization token",
         )
-    raw_token = authorization[7:].strip()
+    raw_token = credentials.credentials.strip()
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -184,15 +188,15 @@ def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
 # POST /auth/logout — delete the current token
 @router.post("/logout")
 def logout(
-    authorization: Optional[str] = Header(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ):
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid authorization token",
         )
-    raw_token = authorization[7:].strip()
+    raw_token = credentials.credentials.strip()
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

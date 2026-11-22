@@ -311,6 +311,7 @@ export interface PlanSlot {
   reason: string;           // Farmer-friendly plain sentence explaining the slot
   field_id: number;
   field_nickname: string;
+  recommendation_id?: number | null;
 }
 
 // Recommendation snapshot from GET /fields/{field_id}/recommendation

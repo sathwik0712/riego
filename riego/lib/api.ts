@@ -355,18 +355,35 @@ export async function getSensorHistory(fieldId: number, hours = 168): Promise<Se
   return apiGet<SensorHistoryResponse>(`/sensor-readings/${fieldId}/history?hours=${hours}`);
 }
 
-// Record an irrigation event for a field (started_at = now UTC, source = "farmer", no recommendation id)
+// Record an irrigation event for a field (started_at = now UTC, event_source = farmer_tap, irrigated_at = now UTC)
+// If the backend returns 404 or 422 for the recommendation_id, retries once without it.
 export async function logIrrigation(
   fieldId: number,
-  durationMinutes: number
+  durationMinutes: number,
+  recommendationId?: number | null
 ): Promise<IrrigationLogEntry> {
-  return apiPost<IrrigationLogEntry>("/irrigation-log", {
+  const nowIso = new Date().toISOString();
+  const payload = {
     field_id: fieldId,
     duration_minutes: durationMinutes,
-    started_at: new Date().toISOString(),
+    started_at: nowIso,
+    irrigated_at: nowIso,
+    event_source: "farmer_tap",
     source: "farmer",
-    recommendation_id: null,
-  });
+    recommendation_id: recommendationId ?? null,
+  };
+
+  try {
+    return await apiPost<IrrigationLogEntry>("/irrigation-log", payload);
+  } catch (err: any) {
+    if (recommendationId && (err?.status === 404 || err?.status === 422)) {
+      return await apiPost<IrrigationLogEntry>("/irrigation-log", {
+        ...payload,
+        recommendation_id: null,
+      });
+    }
+    throw err;
+  }
 }
 
 // Fetch irrigation logs for a field over the last N days (default 1 day)
