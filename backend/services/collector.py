@@ -28,6 +28,7 @@ def run_collection_once() -> Dict[str, int]:
 
     rec_created = 0
     rec_open = 0
+    rec_paused = 0
     rec_not_needed = 0
     rec_no_data = 0
     rec_stale = 0
@@ -95,6 +96,9 @@ def run_collection_once() -> Dict[str, int]:
                     elif outcome == "already_open":
                         rec_open += 1
                         print(f"[Collector] {field_label} recommendation: already open")
+                    elif outcome == "paused_after_irrigation":
+                        rec_paused += 1
+                        print(f"[Collector] {field_label} recommendation: paused after irrigation")
                     elif outcome == "not_needed":
                         rec_not_needed += 1
                         print(f"[Collector] {field_label} recommendation: not needed")
@@ -115,6 +119,7 @@ def run_collection_once() -> Dict[str, int]:
             f"[Collector] Collection complete: {saved_count} saved, {skipped_count} skipped, "
             f"{unavailable_count} weather unavailable, {error_count} errors; "
             f"recommendations: {rec_created} created, {rec_open} already open, "
+            f"{rec_paused} paused after irrigation, "
             f"{rec_not_needed} not needed, {rec_no_data} not enough data, "
             f"{rec_stale} stale, {rec_error} errors ({total_fields} fields total)"
         )
@@ -127,6 +132,7 @@ def run_collection_once() -> Dict[str, int]:
             "error": error_count,
             "rec_created": rec_created,
             "rec_already_open": rec_open,
+            "rec_paused_after_irrigation": rec_paused,
             "rec_not_needed": rec_not_needed,
             "rec_not_enough_data": rec_no_data,
             "rec_stale": rec_stale,

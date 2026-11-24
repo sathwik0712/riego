@@ -189,6 +189,14 @@ def create_manual_reading(
             detail="Failed to save manual reading."
         )
 
+    # Save a recommendation immediately after a manual reading so the plan is always backed by a saved row.
+    # The reading must always succeed; ignore any failure here.
+    try:
+        from services.auto_recommend import ensure_recommendation
+        ensure_recommendation(db, field.id)
+    except Exception:
+        pass
+
     return {
         "field_id": field.id,
         "moisture_percent": reading_in.moisture_percent,

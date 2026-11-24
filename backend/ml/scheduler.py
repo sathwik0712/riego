@@ -139,6 +139,8 @@ def build_plan(
                     f"heavy rain ({rain_mm:.1f} mm) is forecast."
                 ),
                 "recommendation_id": None,
+                "done": False,
+                "done_at": None,
             })
         else:
             time_desc = "morning" if slot_dt.hour < 12 else "evening"
@@ -158,7 +160,114 @@ def build_plan(
                 "duration_minutes": dur,
                 "reason": reason,
                 "recommendation_id": None,
+                "done": False,
+                "done_at": None,
             })
+
+    return slots
+
+
+def slots_from_recommendation(rec: Any, db: Optional[Session] = None) -> List[Dict[str, Any]]:
+    """
+    Rebuild the session list deterministically from a saved recommendation's
+    water_at (first session start) and duration_minutes, using the same rules
+    as build_plan (preferred hours, capped at MAX_SESSION_MINUTES, same reasons).
+    The same input always gives the identical slots without invoking ML models.
+    If db is provided, matches irrigation logs strictly after rec.created_at
+    to mark sessions as done (by order: log 1 -> session 1, log 2 -> session 2).
+    """
+    water_at = getattr(rec, "water_at", None)
+    duration_minutes = getattr(rec, "duration_minutes", None)
+
+    if water_at is None or duration_minutes is None:
+        return []
+
+    total_duration = int(duration_minutes or 0)
+    if total_duration <= 0:
+        return []
+
+    first_dt = _to_ist(water_at)
+
+    # Split duration into chunks up to MAX_SESSION_MINUTES
+    session_durations: List[int] = []
+    remaining = total_duration
+    while remaining > 0:
+        chunk = min(remaining, MAX_SESSION_MINUTES)
+        session_durations.append(chunk)
+        remaining -= chunk
+
+    # Generate candidate datetimes starting with first_dt, then subsequent preferred hours
+    candidates: List[datetime] = [first_dt]
+    current_dt = first_dt
+
+    while len(candidates) < len(session_durations):
+        # Find next preferred hour strictly after current_dt
+        day = current_dt.date()
+        next_dt: Optional[datetime] = None
+        for day_offset in range(4):
+            d = day + timedelta(days=day_offset)
+            for h in sorted(PREFERRED_START_HOURS_IST):
+                cand = datetime(d.year, d.month, d.day, h, 0, 0, tzinfo=IST)
+                if cand > current_dt:
+                    next_dt = cand
+                    break
+            if next_dt:
+                break
+        if not next_dt:
+            break
+        candidates.append(next_dt)
+        current_dt = next_dt
+
+    # If db is provided, fetch irrigation logs for this field after recommendation's created_at
+    logs = []
+    field_id = getattr(rec, "field_id", None)
+    created_at = getattr(rec, "created_at", None)
+    if db is not None and field_id is not None and created_at is not None:
+        import models
+        logs = (
+            db.query(models.IrrigationLog)
+            .filter(
+                models.IrrigationLog.field_id == field_id,
+                models.IrrigationLog.irrigated_at > created_at,
+            )
+            .order_by(models.IrrigationLog.irrigated_at.asc(), models.IrrigationLog.id.asc())
+            .all()
+        )
+
+    slots: List[Dict[str, Any]] = []
+    num_sessions = len(session_durations)
+
+    for idx, dur in enumerate(session_durations):
+        if idx >= len(candidates):
+            break
+
+        slot_dt = candidates[idx]
+        time_desc = "morning" if slot_dt.hour < 12 else "evening"
+        if num_sessions == 1:
+            reason = (
+                f"Water during cool {time_desc} hours for {dur} minutes "
+                f"to reduce evaporation and keep soil moist."
+            )
+        else:
+            reason = (
+                f"Session {idx + 1} of {num_sessions} ({dur} minutes) during cool "
+                f"{time_desc} hours to prevent water runoff and root waterlogging."
+            )
+
+        is_done = idx < len(logs)
+        done_at_str = None
+        if is_done and logs[idx].irrigated_at:
+            val = logs[idx].irrigated_at
+            done_at_str = val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+        slots.append({
+            "start": slot_dt.isoformat(),
+            "duration_minutes": dur,
+            "reason": reason,
+            "recommendation_id": getattr(rec, "id", None),
+            "done": is_done,
+            "done_at": done_at_str,
+        })
 
     return slots
 
@@ -193,6 +302,79 @@ def build_farmer_plan(
     all_slots: List[Dict[str, Any]] = []
 
     for field in fields:
+        # Pending wins: if a field has both a pending and a done recommendation, the plan uses
+        # the pending one. A done one is shown only when no pending one exists and it was created in the last 24 hours.
+        rec_24h_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        active_rec = (
+            db.query(models.Recommendation)
+            .filter(
+                models.Recommendation.field_id == field.id,
+                models.Recommendation.status == "pending",
+            )
+            .order_by(models.Recommendation.created_at.desc())
+            .first()
+        )
+        if not active_rec:
+            active_rec = (
+                db.query(models.Recommendation)
+                .filter(
+                    models.Recommendation.field_id == field.id,
+                    models.Recommendation.status == "done",
+                    models.Recommendation.created_at >= rec_24h_cutoff,
+                )
+                .order_by(models.Recommendation.created_at.desc())
+                .first()
+            )
+
+        if active_rec:
+            rec_slots = slots_from_recommendation(active_rec, db=db)
+            for slot in rec_slots:
+                enriched_slot = dict(slot)
+                enriched_slot["field_id"] = field.id
+                enriched_slot["field_nickname"] = field.nickname or f"Field {field.id}"
+                enriched_slot["recommendation_id"] = active_rec.id
+                enriched_slot["recommendation_status"] = active_rec.status
+                all_slots.append(enriched_slot)
+            continue
+
+        # NOTE: This GET endpoint can now write a recommendation row when no active recommendation exists.
+        # Call ensure_recommendation to either create a new one or determine why we should not.
+        try:
+            from services.auto_recommend import ensure_recommendation
+            ens_result = ensure_recommendation(db, field.id)
+        except Exception:
+            ens_result = {"result": "error"}
+
+        ens_result_key = ens_result.get("result", "")
+
+        if ens_result_key in ("created", "already_open"):
+            # Re-query the pending recommendation that was just created or found
+            new_active_rec = (
+                db.query(models.Recommendation)
+                .filter(
+                    models.Recommendation.field_id == field.id,
+                    models.Recommendation.status == "pending",
+                )
+                .order_by(models.Recommendation.created_at.desc())
+                .first()
+            )
+            if new_active_rec:
+                rec_slots = slots_from_recommendation(new_active_rec, db=db)
+                for slot in rec_slots:
+                    enriched_slot = dict(slot)
+                    enriched_slot["field_id"] = field.id
+                    enriched_slot["field_nickname"] = field.nickname or f"Field {field.id}"
+                    enriched_slot["recommendation_id"] = new_active_rec.id
+                    enriched_slot["recommendation_status"] = new_active_rec.status
+                    all_slots.append(enriched_slot)
+                continue
+            # If re-query somehow missed it, fall through to fresh prediction below
+        elif ens_result_key == "paused_after_irrigation":
+            # Field watered recently — no new sessions to show for this field
+            continue
+
+        # Only when ensure_recommendation says not_needed / not_enough_data / stale / error
+        # fall back to a fresh prediction with recommendation_id null
         pred = predict_for_field(db, field.id)
 
         # Retrieve stored forecast snapshot if available
@@ -206,23 +388,14 @@ def build_farmer_plan(
 
         field_slots = build_plan(pred, now_ist=now, daily_forecast=daily_forecast)
 
-        # Match saved open recommendation for this field (null when none)
-        open_rec = (
-            db.query(models.Recommendation)
-            .filter(
-                models.Recommendation.field_id == field.id,
-                models.Recommendation.status == "pending",
-            )
-            .order_by(models.Recommendation.created_at.desc())
-            .first()
-        )
-        rec_id = open_rec.id if open_rec else None
-
         for slot in field_slots:
             enriched_slot = dict(slot)
             enriched_slot["field_id"] = field.id
             enriched_slot["field_nickname"] = field.nickname or f"Field {field.id}"
-            enriched_slot["recommendation_id"] = rec_id
+            enriched_slot["recommendation_id"] = None
+            enriched_slot["recommendation_status"] = None
+            enriched_slot["done"] = False
+            enriched_slot["done_at"] = None
             all_slots.append(enriched_slot)
 
     if not all_slots:

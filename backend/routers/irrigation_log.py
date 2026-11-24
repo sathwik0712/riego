@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -8,6 +9,7 @@ from schemas import IrrigationLogCreate, IrrigationLogOut, IrrigationLogHistoryO
 from normalize import to_utc
 from services.irrigation_detection import detect_irrigation_events
 from routers.auth import get_current_farmer
+from ml.scheduler import slots_from_recommendation
 
 # APIRouter for irrigation log endpoints
 router = APIRouter(tags=["Irrigation Log"])
@@ -30,6 +32,7 @@ def create_irrigation_log(
         )
 
     # Validate recommendation if provided
+    rec = None
     if log_in.recommendation_id is not None:
         rec = db.query(models.Recommendation).filter(models.Recommendation.id == log_in.recommendation_id).first()
         if not rec:
@@ -42,10 +45,32 @@ def create_irrigation_log(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Recommendation does not belong to this field"
             )
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Duplicate check: return existing log (no new row) if the same field already has
+    # a log with the same duration_minutes in the last 2 minutes (created_at or irrigated_at >= now - 2min)
+    cutoff_2min = now_utc - timedelta(minutes=2)
+    recent_duplicate = (
+        db.query(models.IrrigationLog)
+        .filter(
+            models.IrrigationLog.field_id == log_in.field_id,
+            models.IrrigationLog.duration_minutes == log_in.duration_minutes,
+            or_(
+                models.IrrigationLog.created_at >= cutoff_2min,
+                models.IrrigationLog.irrigated_at >= cutoff_2min,
+            ),
+        )
+        .order_by(models.IrrigationLog.id.desc())
+        .first()
+    )
+    if recent_duplicate:
+        return recent_duplicate
+
+    if rec is not None:
         rec.status = "done"
 
     # Normalize start time and irrigated time to UTC (defaults to current time if omitted)
-    now_utc = datetime.now(timezone.utc)
     started_at = to_utc(log_in.started_at) if log_in.started_at else now_utc
     event_source = log_in.event_source if log_in.event_source else "farmer_tap"
     irrigated_at = to_utc(log_in.irrigated_at) if log_in.irrigated_at else now_utc
@@ -63,6 +88,31 @@ def create_irrigation_log(
     )
 
     db.add(new_log)
+    db.flush()
+
+    # Closing: a pending recommendation becomes done when the number of such logs is at least
+    # its number of sessions, or when a log linked to it by recommendation_id is saved (as now).
+    pending_recs = (
+        db.query(models.Recommendation)
+        .filter(
+            models.Recommendation.field_id == log_in.field_id,
+            models.Recommendation.status == "pending",
+        )
+        .all()
+    )
+    for p_rec in pending_recs:
+        such_logs_count = (
+            db.query(models.IrrigationLog)
+            .filter(
+                models.IrrigationLog.field_id == log_in.field_id,
+                models.IrrigationLog.irrigated_at > p_rec.created_at,
+            )
+            .count()
+        )
+        num_sessions = len(slots_from_recommendation(p_rec))
+        if num_sessions > 0 and such_logs_count >= num_sessions:
+            p_rec.status = "done"
+
     db.commit()
     db.refresh(new_log)
     return new_log

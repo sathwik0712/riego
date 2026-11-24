@@ -30,8 +30,6 @@ import {
   loadDashboardCache,
   savePlanCache,
   loadPlanCache,
-  getSessionDoneAt,
-  pruneSessionDoneCache,
 } from "@/lib/cache";
 import { formatTimeIST, formatLastUpdatedIST } from "@/lib/dateUtils";
 
@@ -61,8 +59,7 @@ type ReadingField = {
 function buildAdviceItems(
   fields: BackendField[],
   activeSlots: PlanSlot[],
-  recMap: Record<number, { status: string; advice_text?: string }>,
-  isSessionDoneFn: (fieldId: number, slotStart: string) => boolean
+  recMap: Record<number, { status: string; advice_text?: string }>
 ): AdviceItem[] {
   const groups: {
     water: AdviceItem[];
@@ -81,10 +78,8 @@ function buildAdviceItems(
       .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
     if (fieldSlots.length > 0) {
-      // Find the first not-done slot
-      const pendingSlots = fieldSlots.filter(
-        (s) => !isSessionDoneFn(field.id, s.start)
-      );
+      // Find the first not-done slot using slot.done
+      const pendingSlots = fieldSlots.filter((s) => !s.done);
 
       if (pendingSlots.length > 0) {
         const earliest = pendingSlots[0];
@@ -188,9 +183,6 @@ export default function HomePage() {
     setUsingCache(false);
     setCacheLabel(undefined);
 
-    // Prune stale done records on each load
-    if (typeof window !== "undefined") pruneSessionDoneCache();
-
     try {
       // 1. Fields
       const fieldsData = await getFields();
@@ -256,24 +248,23 @@ export default function HomePage() {
         }
       });
 
-      // 6. Build per-field advice items using session-keyed done state
+      // 6. Build per-field advice items using slot.done
       const items = buildAdviceItems(
         fieldsData,
         activeSlots,
-        recMap,
-        (fId, slotStart) => Boolean(getSessionDoneAt(fId, slotStart))
+        recMap
       );
       setAdviceItems(items);
 
-      // 7. Desktop schedule preview — first 3 active slots, done state from session cache
+      // 7. Desktop schedule preview — first 3 active slots, done state from slot.done
       const previewItems: ScheduleItem[] = activeSlots.slice(0, 3).map((slot, idx) => ({
         id: `plan-slot-${slot.field_id}-${slot.start}-${idx}`,
         fieldId: slot.field_id,
         fieldName: slot.field_nickname?.trim() || `Field ${slot.field_id}`,
         time: formatTimeIST(slot.start),
         durationMinutes: slot.duration_minutes,
-        done: Boolean(getSessionDoneAt(slot.field_id, slot.start)),
-        doneAt: getSessionDoneAt(slot.field_id, slot.start) ?? undefined,
+        done: Boolean(slot.done),
+        doneAt: slot.done_at ? formatTimeIST(slot.done_at) : undefined,
       }));
 
       // 8. Alerts
@@ -317,8 +308,7 @@ export default function HomePage() {
           const items = buildAdviceItems(
             cached.fields,
             activeSlots,
-            {},
-            (fId, slotStart) => Boolean(getSessionDoneAt(fId, slotStart))
+            {}
           );
           setAdviceItems(items);
 
@@ -330,8 +320,8 @@ export default function HomePage() {
               fieldName: slot.field_nickname?.trim() || `Field ${slot.field_id}`,
               time: formatTimeIST(slot.start),
               durationMinutes: slot.duration_minutes,
-              done: Boolean(getSessionDoneAt(slot.field_id, slot.start)),
-              doneAt: getSessionDoneAt(slot.field_id, slot.start) ?? undefined,
+              done: Boolean(slot.done),
+              doneAt: slot.done_at ? formatTimeIST(slot.done_at) : undefined,
             }));
           setSchedule(previewItems);
         }

@@ -3,10 +3,10 @@
 // Plan Page: Real Irrigation Timetable & Records
 // Loads real time-slotted irrigation plans from GET /plan/today (farmer from token).
 // Groups active slots (duration > 0) by Today and Tomorrow in IST.
-// Done state is per-session, keyed by field_id + slot start time, stored in localStorage.
+// Done state is provided by backend (slot.done and slot.done_at).
 // Saves last good plan in browser storage for offline resilience (NFR-3).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getFields, getTodayPlan, logIrrigation } from "@/lib/api";
 import { BackendField, ScheduleItem } from "@/lib/types";
@@ -19,9 +19,6 @@ import {
   savePlanCache,
   loadPlanCache,
   loadDashboardCache,
-  markSessionDone,
-  getSessionDoneAt,
-  pruneSessionDoneCache,
 } from "@/lib/cache";
 
 /**
@@ -88,13 +85,14 @@ export default function PlanPage() {
   const [savingMap, setSavingMap] = useState<Record<string, boolean>>({});
   const [errorMap, setErrorMap] = useState<Record<string, string | null>>({});
 
-  const loadPlanData = useCallback(async () => {
-    setLoading(true);
+  // Local done state kept for this page session so card never flips back after reload
+  const localDoneRef = useRef<Record<string, string>>({});
+
+  const loadPlanData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     setError(null);
     setUsingCache(false);
     setLastUpdatedTime(null);
-
-    if (typeof window !== "undefined") pruneSessionDoneCache();
 
     try {
       const [realFields, rawSlots] = await Promise.all([
@@ -118,8 +116,12 @@ export default function PlanPage() {
           matched?.name?.trim() ||
           `Field ${slot.field_id}`;
 
-        // Session done state keyed by fieldId + slotStart
-        const doneAt = getSessionDoneAt(slot.field_id, slot.start);
+        const sessionKey = `${slot.field_id}-${slot.start}`;
+        const localDoneTime = localDoneRef.current[sessionKey];
+        const isDone = Boolean(slot.done) || Boolean(localDoneTime);
+        const doneAt = slot.done && slot.done_at
+          ? formatTimeIST(slot.done_at)
+          : localDoneTime || (slot.done_at ? formatTimeIST(slot.done_at) : undefined);
 
         const item: SlottedItem = {
           id: slotItemId(slot.field_id, slot.start, idx),
@@ -129,13 +131,13 @@ export default function PlanPage() {
           recommendationId: slot.recommendation_id ?? null,
           time: formatTimeIST(slot.start),
           durationMinutes: slot.duration_minutes,
-          done: Boolean(doneAt),
-          doneAt: doneAt ?? undefined,
+          done: isDone,
+          doneAt: doneAt,
         };
 
         const dayGroup = getSlotDayGroup(slot.start);
-        if (dayGroup === "tomorrow") tomorrowGroup.push(item);
-        else todayGroup.push(item);
+        if (dayGroup === "today") todayGroup.push(item);
+        else tomorrowGroup.push(item);
       });
 
       setTodayItems(todayGroup);
@@ -169,7 +171,12 @@ export default function PlanPage() {
             matched?.name?.trim() ||
             `Field ${slot.field_id}`;
 
-          const doneAt = getSessionDoneAt(slot.field_id, slot.start);
+          const sessionKey = `${slot.field_id}-${slot.start}`;
+          const localDoneTime = localDoneRef.current[sessionKey];
+          const isDone = Boolean(slot.done) || Boolean(localDoneTime);
+          const doneAt = slot.done && slot.done_at
+            ? formatTimeIST(slot.done_at)
+            : localDoneTime || (slot.done_at ? formatTimeIST(slot.done_at) : undefined);
 
           const item: SlottedItem = {
             id: slotItemId(slot.field_id, slot.start, idx),
@@ -179,13 +186,13 @@ export default function PlanPage() {
             recommendationId: slot.recommendation_id ?? null,
             time: formatTimeIST(slot.start),
             durationMinutes: slot.duration_minutes,
-            done: Boolean(doneAt),
-            doneAt: doneAt ?? undefined,
+            done: isDone,
+            doneAt: doneAt,
           };
 
           const dayGroup = getSlotDayGroup(slot.start);
-          if (dayGroup === "tomorrow") tomorrowGroup.push(item);
-          else todayGroup.push(item);
+          if (dayGroup === "today") todayGroup.push(item);
+          else tomorrowGroup.push(item);
         });
 
         setTodayItems(todayGroup);
@@ -197,7 +204,7 @@ export default function PlanPage() {
         );
       }
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }, []);
 
@@ -206,11 +213,8 @@ export default function PlanPage() {
   }, [loadPlanData]);
 
   const handleDone = async (item: SlottedItem) => {
-    // Prevent double taps or concurrent submissions
-    if (savingMap[item.id]) return;
-    const fieldNumId = Number(item.fieldId);
-    // Never mark a session done twice or send a second log for the same session
-    if (item.done || (fieldNumId && getSessionDoneAt(fieldNumId, item.slotStart))) return;
+    // Stop duplicate logs: disable while running, and for a session already done do nothing at all
+    if (savingMap[item.id] || item.done) return;
 
     setErrorMap((prev) => ({ ...prev, [item.id]: null }));
 
@@ -223,6 +227,7 @@ export default function PlanPage() {
       return;
     }
 
+    // Disable Done button while request is running, show saving state on that card only
     setSavingMap((prev) => ({ ...prev, [item.id]: true }));
 
     try {
@@ -239,10 +244,7 @@ export default function PlanPage() {
           if (other.recommendationId !== item.recommendationId) {
             return false;
           }
-          const otherFieldId = Number(other.fieldId);
-          const isDone =
-            other.done || (otherFieldId ? Boolean(getSessionDoneAt(otherFieldId, other.slotStart)) : false);
-          return !isDone;
+          return !other.done;
         });
 
         if (!otherNotDoneExists) {
@@ -250,23 +252,28 @@ export default function PlanPage() {
         }
       }
 
+      // 1. Post to backend
       const saved = await logIrrigation(matched.id, item.durationMinutes, recIdToSend);
-      const timeStr = formatTimeIST(saved.started_at);
+      const timeStr = formatTimeIST(saved.irrigated_at || saved.started_at);
 
-      // Persist this specific session as done (keyed by fieldId + slotStart)
-      markSessionDone(matched.id, item.slotStart, timeStr);
+      // 2. Set that card to done locally using response's irrigated_at, keeping local done state until full page load
+      const sessionKey = `${item.fieldId}-${item.slotStart}`;
+      localDoneRef.current[sessionKey] = timeStr;
 
-      // Update only this exact item — not all items for the same field
+      // 3. Update the screen state immediately so the card and "N of M" count show done
       const updateList = (list: SlottedItem[]) =>
         list.map((it) =>
-          it.id === item.id ? { ...it, done: true, doneAt: timeStr } : it
+          it.id === item.id || (it.fieldId === item.fieldId && it.slotStart === item.slotStart)
+            ? { ...it, done: true, doneAt: timeStr }
+            : it
         );
       setTodayItems(updateList);
       setTomorrowItems(updateList);
 
-      // Reload plan so the card and Home advice update
-      await loadPlanData();
+      // 4. Reload plan silently in background and replace ALL items with backend's version
+      await loadPlanData(true);
     } catch (err: any) {
+      // If the request fails, keep session not done and show plain error
       setErrorMap((prev) => ({
         ...prev,
         [item.id]: err?.message || "Could not save irrigation. Try again.",
@@ -324,7 +331,7 @@ export default function PlanPage() {
           </span>
           <button
             type="button"
-            onClick={loadPlanData}
+            onClick={() => loadPlanData()}
             className="min-h-[40px] px-4 py-2 rounded-xl bg-[#235334] text-[#FAF7EE] font-semibold text-sm hover:bg-[#1A3E27] active:scale-95 transition-all cursor-pointer"
           >
             Try again
@@ -374,16 +381,31 @@ export default function PlanPage() {
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 lg:gap-6">
-                {todayItems.map((item) => (
-                  <ScheduleCard
-                    key={item.id}
-                    item={item}
-                    matchedField={findMatchedField(item, fields)}
-                    isSaving={Boolean(savingMap[item.id])}
-                    errorMessage={errorMap[item.id]}
-                    onDone={(si) => handleDone(si as SlottedItem)}
-                  />
-                ))}
+                {(() => {
+                  const seenNotDoneFieldKeys = new Set<string>();
+                  return todayItems.map((item) => {
+                    const matched = findMatchedField(item, fields);
+                    const fieldKey = String(
+                      matched?.id ?? item.fieldId ?? item.fieldName.trim().toLowerCase()
+                    );
+                    let canMarkDone = false;
+                    if (!item.done && !seenNotDoneFieldKeys.has(fieldKey)) {
+                      seenNotDoneFieldKeys.add(fieldKey);
+                      canMarkDone = true;
+                    }
+                    return (
+                      <ScheduleCard
+                        key={item.id}
+                        item={item}
+                        matchedField={matched}
+                        isSaving={Boolean(savingMap[item.id])}
+                        errorMessage={errorMap[item.id]}
+                        canMarkDone={canMarkDone}
+                        onDone={(si) => handleDone(si as SlottedItem)}
+                      />
+                    );
+                  });
+                })()}
               </div>
             </section>
           )}
@@ -405,6 +427,7 @@ export default function PlanPage() {
                     matchedField={findMatchedField(item, fields)}
                     isSaving={Boolean(savingMap[item.id])}
                     errorMessage={errorMap[item.id]}
+                    canMarkDone={false}
                     onDone={(si) => handleDone(si as SlottedItem)}
                   />
                 ))}

@@ -268,6 +268,8 @@ export interface IrrigationLogEntry {
   duration_minutes: number;
   water_liters?: number | null;
   source: string;
+  event_source?: string | null;
+  irrigated_at?: string | null;
   recommendation_id?: number | null;
   created_at: string;
 }
@@ -312,6 +314,9 @@ export interface PlanSlot {
   field_id: number;
   field_nickname: string;
   recommendation_id?: number | null;
+  recommendation_status?: "pending" | "done" | null;
+  done?: boolean;
+  done_at?: string | null;
 }
 
 // Recommendation snapshot from GET /fields/{field_id}/recommendation

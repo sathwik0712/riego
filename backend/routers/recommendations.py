@@ -7,7 +7,12 @@ import models
 from schemas import RecommendationCreate, RecommendationOut
 from normalize import to_utc
 from ml.predict import predict_for_field
-from ml.scheduler import build_plan, build_farmer_plan, format_advice_sentence
+from ml.scheduler import (
+    build_plan,
+    build_farmer_plan,
+    format_advice_sentence,
+    slots_from_recommendation,
+)
 from services.auto_recommend import ensure_recommendation, _rec_to_dict
 from routers.auth import get_current_farmer
 
@@ -94,8 +99,102 @@ def get_field_recommendation(
             detail=f"Field with ID {field_id} not found."
         )
 
-    pred = predict_for_field(db, field_id)
+    field_name = field.nickname or f"Field {field.id}"
 
+    # Pending wins: if a field has both a pending and a done recommendation, the plan uses
+    # the pending one. A done one is shown only when no pending one exists and it was created in the last 24 hours.
+    rec_24h_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    active_rec = (
+        db.query(models.Recommendation)
+        .filter(
+            models.Recommendation.field_id == field_id,
+            models.Recommendation.status == "pending",
+        )
+        .order_by(models.Recommendation.created_at.desc())
+        .first()
+    )
+    if not active_rec:
+        active_rec = (
+            db.query(models.Recommendation)
+            .filter(
+                models.Recommendation.field_id == field_id,
+                models.Recommendation.status == "done",
+                models.Recommendation.created_at >= rec_24h_cutoff,
+            )
+            .order_by(models.Recommendation.created_at.desc())
+            .first()
+        )
+
+    if active_rec:
+        rec_slots = slots_from_recommendation(active_rec, db=db)
+        for s in rec_slots:
+            s["recommendation_id"] = active_rec.id
+            s["recommendation_status"] = active_rec.status
+
+        return {
+            "status": "ok",
+            "field_id": field_id,
+            "field_nickname": field.nickname,
+            "should_irrigate": (active_rec.duration_minutes or 0) > 0,
+            "duration_minutes": active_rec.duration_minutes,
+            "action": active_rec.action or ("water" if (active_rec.duration_minutes or 0) > 0 else "wait"),
+            "advice_text": active_rec.advice_text or format_advice_sentence(field_name, rec_slots, True),
+            "slots": rec_slots,
+        }
+
+    # NOTE: This GET endpoint can now write a recommendation row when no active recommendation exists.
+    # Call ensure_recommendation to either create a new one or determine why we should not.
+    try:
+        ens_result = ensure_recommendation(db, field_id)
+    except Exception:
+        ens_result = {"result": "error"}
+
+    ens_result_key = ens_result.get("result", "")
+
+    if ens_result_key in ("created", "already_open"):
+        # Re-query the pending recommendation that was just created or found
+        new_active_rec = (
+            db.query(models.Recommendation)
+            .filter(
+                models.Recommendation.field_id == field_id,
+                models.Recommendation.status == "pending",
+            )
+            .order_by(models.Recommendation.created_at.desc())
+            .first()
+        )
+        if new_active_rec:
+            rec_slots = slots_from_recommendation(new_active_rec, db=db)
+            for s in rec_slots:
+                s["recommendation_id"] = new_active_rec.id
+                s["recommendation_status"] = new_active_rec.status
+            return {
+                "status": "ok",
+                "field_id": field_id,
+                "field_nickname": field.nickname,
+                "should_irrigate": (new_active_rec.duration_minutes or 0) > 0,
+                "duration_minutes": new_active_rec.duration_minutes,
+                "action": new_active_rec.action or ("water" if (new_active_rec.duration_minutes or 0) > 0 else "wait"),
+                "advice_text": new_active_rec.advice_text or format_advice_sentence(field_name, rec_slots, True),
+                "slots": rec_slots,
+            }
+        # If re-query somehow missed it, fall through to fresh prediction below
+
+    elif ens_result_key == "paused_after_irrigation":
+        # Field watered recently — return paused status with no watering slots
+        return {
+            "status": "paused_after_irrigation",
+            "field_id": field_id,
+            "field_nickname": field.nickname,
+            "should_irrigate": False,
+            "duration_minutes": 0,
+            "action": "wait",
+            "advice_text": "You watered recently.",
+            "slots": [],
+        }
+
+    # Only when ensure_recommendation says not_needed / not_enough_data / stale / error,
+    # fall back to a fresh prediction with recommendation_id null
+    pred = predict_for_field(db, field_id)
     # Retrieve stored forecast snapshot if available
     snap = (
         db.query(models.ForecastSnapshot)
@@ -106,22 +205,13 @@ def get_field_recommendation(
     daily_forecast = snap.daily_summary if snap else None
 
     slots = build_plan(pred, daily_forecast=daily_forecast)
-    field_name = field.nickname or f"Field {field.id}"
     advice = format_advice_sentence(field_name, slots, pred.get("should_irrigate", False))
 
-    # Match saved open recommendation for this field (null when none)
-    open_rec = (
-        db.query(models.Recommendation)
-        .filter(
-            models.Recommendation.field_id == field_id,
-            models.Recommendation.status == "pending",
-        )
-        .order_by(models.Recommendation.created_at.desc())
-        .first()
-    )
-    rec_id = open_rec.id if open_rec else None
     for s in slots:
-        s["recommendation_id"] = rec_id
+        s["recommendation_id"] = None
+        s["recommendation_status"] = None
+        s["done"] = False
+        s["done_at"] = None
 
     result = dict(pred)
     result["field_nickname"] = field.nickname

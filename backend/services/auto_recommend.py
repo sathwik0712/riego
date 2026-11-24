@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import models
 from normalize import to_utc
@@ -20,6 +21,7 @@ from ml.scheduler import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+PAUSE_AFTER_DONE_HOURS = 6
 
 
 def are_slots_all_in_past(
@@ -177,7 +179,8 @@ def ensure_recommendation(
     watering_needed = should_irrigate and len(active_slots) > 0
 
     if not watering_needed:
-        # Rule: If an open one exists but the new prediction says no watering is needed, mark it expired.
+        # Rule: If an open one exists but the new prediction says no watering is needed, mark it expired
+        # UNLESS an irrigation log for that field was saved after the recommendation was created.
         still_open = (
             db.query(models.Recommendation)
             .filter(
@@ -187,7 +190,21 @@ def ensure_recommendation(
             .all()
         )
         for r in still_open:
-            r.status = "expired"
+            rec_created = r.created_at
+            if rec_created and rec_created.tzinfo is None:
+                rec_created = rec_created.replace(tzinfo=timezone.utc)
+
+            # Check if any irrigation log was saved after the recommendation was created
+            log_after_rec = (
+                db.query(models.IrrigationLog)
+                .filter(
+                    models.IrrigationLog.field_id == field_id,
+                    models.IrrigationLog.created_at > rec_created,
+                )
+                .first()
+            )
+            if not log_after_rec:
+                r.status = "expired"
         db.commit()
 
         msg = (
@@ -203,37 +220,67 @@ def ensure_recommendation(
             "message": msg,
         }
 
-    # 4. Watering IS needed: check 6-hour deduplication rule
-    cutoff_6h = now_utc - timedelta(hours=6)
-    recent_open = (
+    # 4. Watering IS needed: never create a second pending recommendation for a field
+    existing_open = (
         db.query(models.Recommendation)
         .filter(
             models.Recommendation.field_id == field_id,
             models.Recommendation.status == "pending",
-            models.Recommendation.created_at >= cutoff_6h,
         )
         .order_by(models.Recommendation.created_at.desc())
         .first()
     )
-    if recent_open:
-        res = _rec_to_dict(recent_open)
+    if existing_open:
+        res = _rec_to_dict(existing_open)
         res["saved"] = False
         res["result"] = "already_open"
         return res
 
-    # Expire any older open recommendations before creating the fresh one
-    older_open = (
+    # 4b. No repeat after Done: create nothing if the field has an irrigation log newer than PAUSE_AFTER_DONE_HOURS
+    pause_cutoff = now_utc - timedelta(hours=PAUSE_AFTER_DONE_HOURS)
+    recent_log = (
+        db.query(models.IrrigationLog)
+        .filter(
+            models.IrrigationLog.field_id == field_id,
+            or_(
+                models.IrrigationLog.irrigated_at >= pause_cutoff,
+                models.IrrigationLog.created_at >= pause_cutoff,
+            ),
+        )
+        .order_by(models.IrrigationLog.id.desc())
+        .first()
+    )
+    if recent_log:
+        return {
+            "saved": False,
+            "status": "paused_after_irrigation",
+            "should_irrigate": False,
+            "result": "paused_after_irrigation",
+            "message": "You watered recently.",
+        }
+
+    # 5. Save the new recommendation
+    # Lock the field row to ensure concurrent calls serialize and never create a duplicate pending row
+    try:
+        db.query(models.Field).filter(models.Field.id == field_id).with_for_update().first()
+    except Exception:
+        pass
+
+    double_check_open = (
         db.query(models.Recommendation)
         .filter(
             models.Recommendation.field_id == field_id,
             models.Recommendation.status == "pending",
         )
-        .all()
+        .order_by(models.Recommendation.created_at.desc())
+        .first()
     )
-    for r in older_open:
-        r.status = "expired"
+    if double_check_open:
+        res = _rec_to_dict(double_check_open)
+        res["saved"] = False
+        res["result"] = "already_open"
+        return res
 
-    # 5. Save the new recommendation
     field_name = field.nickname or f"Field {field.id}"
     advice = format_advice_sentence(field_name, slots, True)
     first_start_dt = datetime.fromisoformat(active_slots[0]["start"])

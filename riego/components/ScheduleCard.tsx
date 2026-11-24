@@ -12,6 +12,7 @@ interface ScheduleCardProps {
   matchedField?: BackendField;
   isSaving: boolean;
   errorMessage?: string | null;
+  canMarkDone?: boolean;
   onDone: (item: ScheduleItem) => void;
 }
 
@@ -20,6 +21,7 @@ export default function ScheduleCard({
   matchedField,
   isSaving,
   errorMessage,
+  canMarkDone = true,
   onDone,
 }: ScheduleCardProps) {
   // Field display title
@@ -120,7 +122,7 @@ export default function ScheduleCard({
               </span>
             )}
           </div>
-        ) : (
+        ) : canMarkDone ? (
           // Action button: at least 56px tall, disabled while saving, prevents double taps
           <button
             type="button"
@@ -141,6 +143,14 @@ export default function ScheduleCard({
               </>
             )}
           </button>
+        ) : (
+          // Upcoming session (tomorrow / later day / later today for same field): no Done button
+          <div className="min-h-[56px] w-full rounded-2xl bg-[#FAF7EE] border border-[#DCD6C0] text-[#5F6E62] px-4 py-3 flex items-center justify-center gap-2">
+            <ClockIcon className="w-4 h-4 text-[#5F6E62] shrink-0" />
+            <span className="font-semibold text-sm sm:text-base">
+              Scheduled
+            </span>
+          </div>
         )}
       </div>
     </article>
