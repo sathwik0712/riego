@@ -621,3 +621,32 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 
 
 
+---
+
+## Session 31: Weeks 3-4 (22-24 November 2026) - Stable plan and Done fixes
+- Problem: the plan was recalculated from a fresh prediction on every call. After one irrigation log the model's inputs changed, so sessions changed or disappeared and Done flipped back.
+- A saved pending recommendation now freezes the plan (slots_from_recommendation rebuilds the same sessions from the saved start time and total minutes, without calling the model). A done recommendation from the last 24 hours is shown only when no pending one exists (pending wins).
+- Done lives in the backend: every slot in GET /plan/today and GET /fields/{id}/recommendation has done and done_at. Logs after the recommendation was created mark sessions done in order (log 1 = session 1). The recommendation closes when all sessions are done or when the last log is linked by recommendation_id. The frontend reads done from the backend; browser-only done records were removed.
+- Duplicate taps: the same duration logged for the same field within 2 minutes returns the existing log.
+- After a log, no new recommendation is created for 6 hours (PAUSE_AFTER_DONE_HOURS). A pending recommendation is not expired by a "not needed" prediction if a log was saved after it.
+
+---
+
+## Session 32: Weeks 3-4 (24 November 2026) - Save recommendation on demand
+- Advice shown from a live prediction was never saved, so Done had nothing to link to. Now build_farmer_plan, GET /fields/{id}/recommendation and POST /fields/{id}/manual-reading call ensure_recommendation, so every plan the farmer sees is backed by a saved row. The manual reading always saves even if the recommendation step fails.
+- Plan page: only the first not-done session of each field for today has a Done button; later sessions and all of tomorrow show "Scheduled".
+
+### Known Gaps
+- Done marks sessions by order, not by time, so a late or out-of-order tap marks the next session in line.
+- A mistaken Done is not undone (an Undo could be added).
+- GET /plan/today and GET /fields/{id}/recommendation can now write a recommendation row.
+- Sensor endpoints (POST /sensor-readings) still accept any device ID.
+- OTP is still fake; expired tokens are not removed.
+- Still open: rain of 5 mm or more always blocks watering, manual ALTER TABLE changes (no setup script), moisture cut-offs 30/60 differ from ML limits, rain-fed fields with pumps in fake data, no cleanup of old collector data, two source columns in irrigation_logs, alerts and active alerts tile still sample data, LSTM not done.
+
+### What's Next
+1. Protect sensor endpoints (registered devices only)
+2. Rain override rule and cleanup batch
+3. Database setup script
+4. LSTM, compare all three models in MLflow
+5. Weeks 5-6: alerts, language and voice, field detail page, reports, deployment

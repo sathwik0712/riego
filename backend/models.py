@@ -62,6 +62,9 @@ class Field(Base):
     # Optional unique telemetry device ID
     device_id = Column(String, nullable=True, unique=True)
 
+    # SHA-256 hash of the device key (never stored in plain text)
+    device_key_hash = Column(String(64), nullable=True)
+
     # Registration timestamp with timezone (defaults to now)
     registered_at = Column(DateTime(timezone=True), server_default=func.now())
 

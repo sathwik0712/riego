@@ -1,6 +1,7 @@
+import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from database import get_db
@@ -12,17 +13,42 @@ from routers.auth import get_current_farmer
 # APIRouter for sensor readings
 router = APIRouter(prefix="/sensor-readings", tags=["Sensor"])
 
-# Record a new sensor reading (unprotected - hardware device ingest)
+_DEVICE_KEY_ERR = "Device key missing or wrong"
+
+
+def _check_device_key(field: models.Field, x_device_key: Optional[str]) -> None:
+    """Raise 401 with a uniform message for any device-key failure."""
+    if not x_device_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_DEVICE_KEY_ERR)
+    if not field.device_key_hash:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_DEVICE_KEY_ERR)
+    supplied_hash = hashlib.sha256(x_device_key.encode()).hexdigest()
+    if not _constant_time_equal(supplied_hash, field.device_key_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_DEVICE_KEY_ERR)
+
+
+def _constant_time_equal(a: str, b: str) -> bool:
+    """Compare two hex strings in constant time (same length guaranteed for SHA-256)."""
+    import hmac
+    return hmac.compare_digest(a, b)
+
+
+# Record a new sensor reading — requires X-Device-Key header
 @router.post("", response_model=SensorReadingOut, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=SensorReadingOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def create_sensor_reading(reading_in: SensorReadingCreate, db: Session = Depends(get_db)):
+def create_sensor_reading(
+    reading_in: SensorReadingCreate,
+    db: Session = Depends(get_db),
+    x_device_key: Optional[str] = Header(default=None),
+):
     # Verify that a field exists with this device_id
     field = db.query(models.Field).filter(models.Field.device_id == reading_in.device_id).first()
     if not field:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No field found with device ID '{reading_in.device_id}'."
-        )
+        # Unknown device — same 401 (do not reveal whether device exists)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_DEVICE_KEY_ERR)
+
+    # Validate device key
+    _check_device_key(field, x_device_key)
 
     # Normalize reading timestamp to UTC
     reading_time = to_utc(reading_in.time)
@@ -118,9 +144,24 @@ def get_field_sensor_history(
         "readings": items,
     }
 
-# Retrieve the latest 20 readings for a device, ordered newest first (unprotected - diagnostic / hardware check)
+# Retrieve the latest 20 readings for a device — farmer token + owner only
 @router.get("/{device_id}", response_model=List[SensorReadingOut])
-def get_sensor_readings(device_id: str, db: Session = Depends(get_db)):
+def get_sensor_readings(
+    device_id: str,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    """
+    Return the latest 20 readings for a device_id.
+    Requires a farmer bearer token; returns 404 if the device belongs to another farmer.
+    """
+    # Look up the field that owns this device
+    field = db.query(models.Field).filter(models.Field.device_id == device_id).first()
+    if not field or field.farmer_id != current_farmer.farmer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device '{device_id}' not found.",
+        )
     readings = (
         db.query(models.SensorReading)
         .filter(models.SensorReading.device_id == device_id)

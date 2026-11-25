@@ -1,6 +1,9 @@
+import hashlib
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -11,12 +14,37 @@ from pump import resolve_pump_flow
 from ml.predict import predict_for_field
 from routers.auth import get_current_farmer
 
+
+def _generate_device_key() -> tuple[str, str]:
+    """Return (plain_key, sha256_hex_hash). The plain key is a 32-byte URL-safe token."""
+    plain = secrets.token_urlsafe(32)
+    hashed = hashlib.sha256(plain.encode()).hexdigest()
+    return plain, hashed
+
+
+def _jsonable(obj):
+    """Recursively convert non-JSON-serializable types to strings."""
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonable(i) for i in obj]
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+    try:
+        from datetime import date
+        if isinstance(obj, date):
+            return obj.isoformat()
+    except Exception:
+        pass
+    return obj
+
+
 # APIRouter for field-related endpoints
 router = APIRouter(prefix="/fields", tags=["Fields"])
 
 # Create a new field
-@router.post("", response_model=FieldOut, status_code=status.HTTP_201_CREATED)
-@router.post("/", response_model=FieldOut, status_code=status.HTTP_201_CREATED, include_in_schema=False)
+@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_field(
     field_in: FieldCreate,
     db: Session = Depends(get_db),
@@ -33,6 +61,12 @@ def create_field(
 
     # Resolve pump flow rate and source based on typed flow or horsepower
     flow_lph, flow_source = resolve_pump_flow(field_in.pump_flow_rate, field_in.pump_hp)
+
+    # Generate device key when has_sensor is true (returned once, only hash stored)
+    plain_key: Optional[str] = None
+    key_hash: Optional[str] = None
+    if field_in.has_sensor:
+        plain_key, key_hash = _generate_device_key()
 
     # Instantiate the new field with logged-in farmer_id
     new_field = models.Field(
@@ -52,12 +86,59 @@ def create_field(
         pump_flow_source=flow_source,
         has_sensor=field_in.has_sensor,
         device_id=field_in.device_id if field_in.device_id else None,
+        device_key_hash=key_hash,
     )
 
     db.add(new_field)
     db.commit()
     db.refresh(new_field)
-    return new_field
+
+    # Build response from FieldOut, then inject device_key once if sensor field
+    out = FieldOut.model_validate(new_field) if hasattr(FieldOut, "model_validate") else FieldOut.from_orm(new_field)
+    response_data = out.model_dump() if hasattr(out, "model_dump") else out.dict()
+    if plain_key is not None:
+        response_data["device_key"] = plain_key
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=_jsonable(response_data))
+
+
+# POST /fields/{field_id}/device-key — farmer owner only, make or rotate the device key
+@router.post("/{field_id}/device-key", status_code=status.HTTP_201_CREATED)
+def rotate_device_key(
+    field_id: int,
+    db: Session = Depends(get_db),
+    current_farmer: models.Farmer = Depends(get_current_farmer),
+):
+    """
+    Issue or rotate the device key for a sensor field.
+    - 404 if the field does not exist or belongs to another farmer.
+    - 400 if has_sensor is False or the field has no device_id.
+    - Returns device_key once; only the hash is stored.
+    """
+    field = db.query(models.Field).filter(models.Field.id == field_id).first()
+    if not field or field.farmer_id != current_farmer.farmer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Field with ID {field_id} not found.",
+        )
+    if not field.has_sensor:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This field has no sensor. Device key requires has_sensor=true.",
+        )
+    if not field.device_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This field has no device_id set. Assign a device_id before issuing a key.",
+        )
+
+    plain_key, key_hash = _generate_device_key()
+    field.device_key_hash = key_hash
+    db.commit()
+
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={"field_id": field_id, "device_id": field.device_id, "device_key": plain_key},
+    )
 
 # List all fields for the logged-in farmer, ordered newest first
 @router.get("", response_model=List[FieldOut])
