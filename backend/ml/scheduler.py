@@ -9,9 +9,18 @@ aligned with agronomic best practices:
 """
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
+
+# Add backend directory so crop_targets can be imported
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from crop_targets import get_target_range
 
 # ---------------------------------------------------------------------------
 # CONSTANTS (approximate values, mentor to confirm)
@@ -41,7 +50,7 @@ def _get_day_rain_mm(
 ) -> float:
     """
     Extract forecasted rainfall in mm for the day of slot_dt.
-    Checks daily_forecast first, then falls back to rain_next_24h_mm.
+    Checks daily_forecast first, then falls back to rain_next_24h_mm or rain_mm.
     """
     slot_date_str = slot_dt.strftime("%Y-%m-%d")
 
@@ -54,14 +63,72 @@ def _get_day_rain_mm(
                 if rain_val is not None:
                     return float(rain_val)
 
-    # 2. Check 24h summary forecast
-    rain_24h = prediction.get("rain_next_24h_mm")
-    if rain_24h is None and "raw_row" in prediction:
-        rain_24h = prediction["raw_row"].get("rain_next_24h_mm")
-    if rain_24h is not None:
-        return float(rain_24h)
+    # 2. Check 24h summary forecast / rain fields
+    rain_val = prediction.get("rain_next_24h_mm")
+    if rain_val is None:
+        rain_val = prediction.get("rain_mm")
+    if rain_val is None:
+        rain_val = prediction.get("rain")
+    if rain_val is None and "raw_row" in prediction and isinstance(prediction["raw_row"], dict):
+        rain_val = (
+            prediction["raw_row"].get("rain_next_24h_mm")
+            or prediction["raw_row"].get("rain_mm")
+            or prediction["raw_row"].get("rain")
+        )
+    if rain_val is not None:
+        return float(rain_val)
 
     return 0.0
+
+
+def is_soil_very_dry(prediction: Dict[str, Any]) -> bool:
+    """
+    Check if the latest soil moisture reading is below the crop's dry limit.
+    Uses get_target_range(crop, stage)[0] from crop_targets.py.
+    Returns False if:
+      - water source is Rain-fed (rain-fed fields unchanged)
+      - no soil moisture reading is present
+      - soil moisture >= dry limit
+    """
+    water_source = prediction.get("water_source")
+    if water_source is None and "raw_row" in prediction and isinstance(prediction["raw_row"], dict):
+        water_source = prediction["raw_row"].get("water_source")
+    if water_source and str(water_source).strip().lower() == "rain-fed":
+        return False
+
+    latest_moisture = prediction.get("latest_moisture_pct")
+    if latest_moisture is None:
+        latest_moisture = prediction.get("soil_moisture_pct")
+    if latest_moisture is None:
+        latest_moisture = prediction.get("moisture")
+    if latest_moisture is None and "raw_row" in prediction and isinstance(prediction["raw_row"], dict):
+        latest_moisture = (
+            prediction["raw_row"].get("soil_moisture_pct")
+            or prediction["raw_row"].get("latest_moisture_pct")
+        )
+
+    if latest_moisture is None:
+        return False
+
+    try:
+        val = float(latest_moisture)
+    except (ValueError, TypeError):
+        return False
+
+    # Check for NaN
+    if val != val:
+        return False
+
+    crop = prediction.get("crop")
+    if crop is None and "raw_row" in prediction and isinstance(prediction["raw_row"], dict):
+        crop = prediction["raw_row"].get("crop")
+
+    stage = prediction.get("growth_stage") or prediction.get("stage")
+    if stage is None and "raw_row" in prediction and isinstance(prediction["raw_row"], dict):
+        stage = prediction["raw_row"].get("growth_stage")
+
+    dry_limit, _ = get_target_range(crop, stage)
+    return val < dry_limit
 
 
 def build_plan(
@@ -111,6 +178,8 @@ def build_plan(
     if not candidates:
         return []
 
+    very_dry = is_soil_very_dry(prediction)
+
     # Split duration into chunks up to MAX_SESSION_MINUTES
     session_durations: List[int] = []
     remaining = total_duration
@@ -131,17 +200,32 @@ def build_plan(
 
         # Check heavy rain rule (>= 5 mm)
         if rain_mm >= HEAVY_RAIN_THRESHOLD_MM:
-            slots.append({
-                "start": slot_dt.isoformat(),
-                "duration_minutes": 0,
-                "reason": (
-                    f"Skipped irrigation on {slot_dt.strftime('%d %b')} because "
-                    f"heavy rain ({rain_mm:.1f} mm) is forecast."
-                ),
-                "recommendation_id": None,
-                "done": False,
-                "done_at": None,
-            })
+            if very_dry:
+                # Soil is very dry: do not block. Give one short session:
+                # half the normal duration, at most 20 minutes.
+                short_dur = max(1, int(min(round(total_duration / 2.0), 20)))
+                slots.append({
+                    "start": slot_dt.isoformat(),
+                    "duration_minutes": short_dur,
+                    "reason": "Soil is very dry. Rain may come, but water a little today.",
+                    "is_rain_dry": True,
+                    "recommendation_id": None,
+                    "done": False,
+                    "done_at": None,
+                })
+                return slots
+            else:
+                slots.append({
+                    "start": slot_dt.isoformat(),
+                    "duration_minutes": 0,
+                    "reason": (
+                        f"Skipped irrigation on {slot_dt.strftime('%d %b')} because "
+                        f"heavy rain ({rain_mm:.1f} mm) is forecast."
+                    ),
+                    "recommendation_id": None,
+                    "done": False,
+                    "done_at": None,
+                })
         else:
             time_desc = "morning" if slot_dt.hour < 12 else "evening"
             if num_sessions == 1:
@@ -442,6 +526,10 @@ def format_advice_sentence(
     active_slots = [s for s in slots if s.get("duration_minutes", 0) > 0]
     if not active_slots:
         return f"Heavy rain forecast for {field_name}; skip irrigation today."
+
+    # Rain forecast >= 5 mm with very dry soil
+    if any(s.get("is_rain_dry") or "water a little today" in s.get("reason", "").lower() for s in active_slots):
+        return "Soil is very dry. Rain may come, but water a little today."
 
     if len(active_slots) == 1:
         first = active_slots[0]
