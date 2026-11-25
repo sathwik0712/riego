@@ -1,27 +1,56 @@
 """Service for aggregating comprehensive field telemetry and conditions."""
 
 from datetime import datetime, timezone
+from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 import models
 import services.sensor as sensor_service
 import services.weather as weather_service
 
-# Rule-based soil moisture thresholds (plain rules, to be replaced by ML engine)
-# Below 30% is considered dry, 30% to 59% is okay, 60% and above is good.
-MOISTURE_DRY_THRESHOLD = 30.0
-MOISTURE_GOOD_THRESHOLD = 60.0
+# Add backend directory so crop_targets and growth can be imported
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from crop_targets import _LOWER_CROP_TARGETS, get_target_range
+from growth import get_growth_stage
+
+# Default fallback soil moisture thresholds when crop or stage is unknown
+CONDITIONS_FALLBACK = (30.0, 60.0)
+MOISTURE_DRY_THRESHOLD = CONDITIONS_FALLBACK[0]
+MOISTURE_GOOD_THRESHOLD = CONDITIONS_FALLBACK[1]
 
 
-def _compute_moisture_level(moisture_percent: Optional[float]) -> Optional[str]:
-    """Compute rule-based moisture level ('dry', 'okay', 'good') or None if missing."""
+def _compute_moisture_level(
+    moisture_percent: Optional[float],
+    crop: Optional[str] = None,
+    stage: Optional[str] = None,
+) -> Optional[str]:
+    """Compute rule-based moisture level ('dry', 'okay', 'good') or None if missing.
+    Uses crop_targets for known crop & stage to match ML scheduler limits.
+    Falls back to CONDITIONS_FALLBACK (30.0, 60.0) if crop or stage is unknown.
+    """
     if moisture_percent is None:
         return None
-    if moisture_percent < MOISTURE_DRY_THRESHOLD:
+
+    clean_crop = crop.strip().lower() if isinstance(crop, str) else ""
+    clean_stage = stage.strip().lower() if isinstance(stage, str) else ""
+    crop_dict = _LOWER_CROP_TARGETS.get(clean_crop)
+    if crop_dict is not None and clean_stage in crop_dict:
+        dry_limit, good_limit = crop_dict[clean_stage]
+    else:
+        dry_limit, good_limit = CONDITIONS_FALLBACK
+
+    if moisture_percent < dry_limit:
         return "dry"
-    if moisture_percent < MOISTURE_GOOD_THRESHOLD:
+    if moisture_percent < good_limit:
         return "okay"
     return "good"
+
+
+compute_moisture_level = _compute_moisture_level
 
 
 def get_field_conditions(db: Session, field: models.Field) -> Dict[str, Any]:
@@ -34,13 +63,15 @@ def get_field_conditions(db: Session, field: models.Field) -> Dict[str, Any]:
 
     Fails gracefully: outages or missing data in one component never block the other.
     """
-    # 1. Calculate days since sowing
+    # 1. Calculate days since sowing and growth stage
     days_since_sowing: Optional[int] = None
     if field.sowing_date is not None:
         today_utc = datetime.now(timezone.utc).date()
         diff_days = (today_utc - field.sowing_date).days
         if diff_days >= 0:
             days_since_sowing = diff_days
+
+    growth_stage = get_growth_stage(field.sowing_date, field.crop)
 
     # 2. Retrieve latest soil moisture reading, status, and rule-based level
     try:
@@ -54,7 +85,11 @@ def get_field_conditions(db: Session, field: models.Field) -> Dict[str, Any]:
             "device_id": getattr(field, "device_id", None),
         }
 
-    moisture_level = _compute_moisture_level(sensor_info.get("moisture_percent"))
+    moisture_level = _compute_moisture_level(
+        sensor_info.get("moisture_percent"),
+        crop=field.crop,
+        stage=growth_stage,
+    )
 
     device_id = sensor_info.get("device_id")
     source = sensor_info.get("source")

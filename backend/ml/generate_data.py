@@ -239,9 +239,12 @@ def generate_synthetic_dataset(
         water_source = str(rng.choice(WATER_SOURCES))
         area_acres = round(float(rng.choice([0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0])), 1)
 
-        # 90% fields have pump flow rate, 10% null
-        has_flow_rate = rng.random() < 0.90
-        pump_flow_rate_lph = float(rng.choice(flow_rate_options)) if has_flow_rate else None
+        # 90% fields have pump flow rate, 10% null; Rain-fed fields never have a pump
+        if water_source == "Rain-fed":
+            pump_flow_rate_lph = None
+        else:
+            has_flow_rate = rng.random() < 0.90
+            pump_flow_rate_lph = float(rng.choice(flow_rate_options)) if has_flow_rate else None
 
         # Sowing date on or before start_date (or 5% null for 'Not sown yet')
         if rng.random() < 0.95:
