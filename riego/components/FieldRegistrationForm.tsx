@@ -19,6 +19,7 @@ import {
 import { createField } from "../lib/api";
 import { AlertIcon, CheckIcon, HelpCircleIcon, ZapIcon, MapPinIcon } from "./icons";
 import LocationPicker from "./LocationPicker";
+import SensorKeyPanel from "./SensorKeyPanel";
 
 // Step titles and icons for the progress indicator
 const STEP_CONFIG = [
@@ -92,6 +93,9 @@ export default function FieldRegistrationForm() {
 
   // State to display the post-save success screen
   const [isSaved, setIsSaved] = useState<boolean>(false);
+
+  // Temporary in-memory sensor key returned upon registration (never persisted or logged)
+  const [pendingSensorKey, setPendingSensorKey] = useState<string | null>(null);
 
   // Helper to update specific form fields
   const updateField = <K extends keyof FieldFormData>(
@@ -261,8 +265,12 @@ export default function FieldRegistrationForm() {
         device_id: deviceId,
       };
 
-      await createField(payload);
-      setIsSaved(true);
+      const created = await createField(payload);
+      if (created && created.device_key) {
+        setPendingSensorKey(created.device_key);
+      } else {
+        setIsSaved(true);
+      }
     } catch (err: any) {
       // Backend validation errors (e.g. duplicate device ID) are presented as a short plain sentence
       setSaveError(err?.message || "Something went wrong. Please try again.");
@@ -279,10 +287,26 @@ export default function FieldRegistrationForm() {
       id: nextId,
     });
     setCurrentStep(1);
+    setPendingSensorKey(null);
     setIsSaved(false);
     setErrorMessage(null);
     setSaveError(null);
   };
+
+  // -------------------------------------------------------------
+  // SENSOR KEY PANEL (Shown once before leaving or going to dashboard)
+  // -------------------------------------------------------------
+  if (pendingSensorKey) {
+    return (
+      <SensorKeyPanel
+        deviceKey={pendingSensorKey}
+        onClose={() => {
+          setPendingSensorKey(null);
+          setIsSaved(true);
+        }}
+      />
+    );
+  }
 
   // -------------------------------------------------------------
   // SUCCESS SCREEN (After saving field)

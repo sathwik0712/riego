@@ -212,6 +212,7 @@ export interface BackendField {
   pump_flow_source?: string | null;
   has_sensor: boolean;
   device_id?: string | null;
+  device_key?: string | null;
   registered_at: string;
   growth_stage: string;
 }
@@ -354,6 +355,12 @@ export interface ReversePlaceResult {
   name: string;
   state: string;
   country: string;
+}
+
+export interface DeviceKeyResponse {
+  field_id: number;
+  device_id: string;
+  device_key: string;
 }
 
 

@@ -16,7 +16,19 @@ export interface DashboardCache {
 /** Save dashboard data. Silently ignores quota or security errors. */
 export function saveDashboardCache(data: DashboardCache): void {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    // Ensure device_key is never cached even if present in BackendField objects
+    const sanitizedFields = data.fields.map((f) => {
+      const copy = { ...f };
+      delete copy.device_key;
+      return copy;
+    });
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        ...data,
+        fields: sanitizedFields,
+      })
+    );
   } catch {
     // localStorage full or not available — ignore silently
   }

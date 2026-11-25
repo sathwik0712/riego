@@ -1,12 +1,17 @@
+"use client";
+
 // Reusable Field Card component
 // Displays field name/nickname, crop, soil moisture progress bar, and operational status
 // Responsive: compact view on phone/tablet, expanded details on desktop
 
+import { useState } from "react";
 import { STRINGS } from "../lib/strings";
 import { Field, BackendField, FieldConditions } from "../lib/types";
 import { getFieldMoistureDisplay, timeAgo } from "../lib/fieldStatus";
-import { ClockIcon, EditIcon, MapPinIcon, AlertIcon } from "./icons";
+import { ClockIcon, EditIcon, MapPinIcon, AlertIcon, KeyIcon } from "./icons";
+import { rotateDeviceKey } from "../lib/api";
 import Sparkline from "./Sparkline";
+import SensorKeyPanel from "./SensorKeyPanel";
 
 interface FieldCardProps {
   field: Field | BackendField;
@@ -45,8 +50,43 @@ export default function FieldCard({
   onEnterReading,
   onChangeLocation,
 }: FieldCardProps) {
+  // Device key rotation state (in-memory only, never persisted or logged)
+  const [showConfirm, setShowConfirm] = useState<boolean>(false);
+  const [isRotating, setIsRotating] = useState<boolean>(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+
   // Determine if this is a real BackendField or legacy mock Field
   const isBackend = "latitude" in field || "registered_at" in field;
+  const backendField = isBackend ? (field as BackendField) : null;
+
+  const canHaveSensorKey = Boolean(
+    backendField &&
+    backendField.has_sensor &&
+    backendField.device_id &&
+    backendField.device_id.trim() &&
+    backendField.device_id !== "null"
+  );
+
+  const handleRotateKey = async () => {
+    if (!backendField) return;
+    setIsRotating(true);
+    setKeyError(null);
+    try {
+      const res = await rotateDeviceKey(backendField.id);
+      setShowConfirm(false);
+      if (res && res.device_key) {
+        setActiveKey(res.device_key);
+      } else {
+        setKeyError("Could not make a key. Try again.");
+      }
+    } catch {
+      setShowConfirm(false);
+      setKeyError("Could not make a key. Try again.");
+    } finally {
+      setIsRotating(false);
+    }
+  };
 
   // Check if field is still on the legacy placeholder coordinates (13.0827, 77.5877)
   const isPlaceholderLocation =
@@ -290,9 +330,33 @@ export default function FieldCard({
         </div>
       </div>
 
-      {/* ── Fields page action: Change location & Enter reading buttons (>=56px tall) ── */}
-      {(onEnterReading || (onChangeLocation && isBackend)) && (
+      {/* ── Action buttons (Change location, Enter reading, New sensor key >=56px tall) ── */}
+      {(onEnterReading || (onChangeLocation && isBackend) || canHaveSensorKey || keyError) && (
         <div className="pt-4 mt-4 border-t border-[#F2EFE4] flex flex-col gap-2.5">
+          {keyError && (
+            <div
+              role="alert"
+              className="p-3.5 rounded-2xl bg-[#FDF2F2] border border-[#FCA5A5] text-[#C53030] text-sm font-medium flex items-center gap-2"
+            >
+              <AlertIcon className="w-4 h-4 shrink-0 text-[#C53030]" />
+              <span>Could not make a key. Try again.</span>
+            </div>
+          )}
+
+          {canHaveSensorKey && (
+            <button
+              type="button"
+              onClick={() => {
+                setKeyError(null);
+                setShowConfirm(true);
+              }}
+              className="w-full min-h-[56px] rounded-2xl bg-[#FAF7EE] hover:bg-[#F2EDDC] active:scale-95 border border-[#DCD6C0] text-[#235334] font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <KeyIcon className="w-5 h-5 text-[#235334]" />
+              <span>New sensor key</span>
+            </button>
+          )}
+
           {onChangeLocation && isBackend && (
             <button
               type="button"
@@ -315,6 +379,51 @@ export default function FieldCard({
             </button>
           )}
         </div>
+      )}
+
+      {/* Confirmation modal for rotating sensor key */}
+      {showConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`confirm-key-title-${field.id}`}
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 border border-[#DCD6C0] shadow-xl flex flex-col gap-5 text-center">
+            <p
+              id={`confirm-key-title-${field.id}`}
+              className="text-base sm:text-lg font-bold text-[#1B2D21]"
+            >
+              The old key will stop working. Make a new key?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                disabled={isRotating}
+                className="flex-1 min-h-[56px] rounded-2xl border border-[#DCD6C0] bg-[#FAF7EE] hover:bg-[#F2EDDC] text-[#1B2D21] font-bold text-base transition-all cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRotateKey}
+                disabled={isRotating}
+                className="flex-1 min-h-[56px] rounded-2xl bg-[#235334] hover:bg-[#1A3E27] text-[#FAF7EE] font-bold text-base transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+              >
+                {isRotating ? "Making key..." : "Yes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sensor Key display panel (shown once, kept in memory only) */}
+      {activeKey && (
+        <SensorKeyPanel
+          deviceKey={activeKey}
+          onClose={() => setActiveKey(null)}
+        />
       )}
     </article>
   );

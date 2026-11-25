@@ -26,9 +26,10 @@ import {
   SensorHistoryResponse,
   PlaceResult,
   ReversePlaceResult,
+  DeviceKeyResponse,
 } from "./types";
 
-export type { PlaceResult, ReversePlaceResult };
+export type { PlaceResult, ReversePlaceResult, DeviceKeyResponse };
 
 // Base API address from environment variable (falls back to local FastAPI backend)
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -444,5 +445,10 @@ export async function updateFieldLocation(
     latitude: lat,
     longitude: lon,
   });
+}
+
+/** POST /fields/{field_id}/device-key — make or rotate device key (farmer token protected) */
+export async function rotateDeviceKey(fieldId: number): Promise<DeviceKeyResponse> {
+  return apiPost<DeviceKeyResponse>(`/fields/${fieldId}/device-key`);
 }
 
