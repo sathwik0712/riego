@@ -30,6 +30,7 @@ MAX_SESSION_MINUTES = 60              # Cap per session to avoid runoff / satura
 GAP_BETWEEN_FIELDS_MINUTES = 10       # Buffer between fields sharing a pump
 MAX_PLAN_HORIZON_HOURS = 48           # Plan covers at most the next 48 hours
 HEAVY_RAIN_THRESHOLD_MM = 5.0         # 5 mm or more cancels irrigation
+HEAVY_RAIN_MM = 20                    # 20 mm or more cancels irrigation unconditionally
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -200,8 +201,8 @@ def build_plan(
 
         # Check heavy rain rule (>= 5 mm)
         if rain_mm >= HEAVY_RAIN_THRESHOLD_MM:
-            if very_dry:
-                # Soil is very dry: do not block. Give one short session:
+            if very_dry and rain_mm < HEAVY_RAIN_MM:
+                # Soil is very dry and rain under 20 mm: do not block. Give one short session:
                 # half the normal duration, at most 20 minutes.
                 short_dur = max(1, int(min(round(total_duration / 2.0), 20)))
                 slots.append({
