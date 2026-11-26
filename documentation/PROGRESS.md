@@ -650,3 +650,45 @@ Mentor feedback noted that the mobile interface was working well, but the deskto
 3. Database setup script
 4. LSTM, compare all three models in MLflow
 5. Weeks 5-6: alerts, language and voice, field detail page, reports, deployment
+
+
+---
+
+## Session 33: Weeks 3-4 (25 November 2026) - Device key for sensors (backend)
+- New column fields.device_key_hash (String 64, nullable), added with a manual ALTER TABLE. Only the SHA-256 hash of a key made with secrets.token_urlsafe(24) is stored; keys are compared with hmac.compare_digest.
+- POST /fields returns device_key once when has_sensor is true. New POST /fields/{id}/device-key (owner only, needs has_sensor and device_id) makes or rotates a key and returns it once. GET endpoints never return it.
+- POST /sensor-readings needs the X-Device-Key header. Unknown device, no key set, missing header and wrong key all give the same 401 "Device key missing or wrong". GET /sensor-readings/{device_id} needs the farmer token and is owner only (404 otherwise).
+- fake_sensor.py has --device-key or RIEGO_DEVICE_KEY and never prints the key.
+- Existing sensor fields get 401 until a key is made with POST /fields/{id}/device-key.
+- Tested by hand: key shown once, right key 201, wrong or missing key 401, rotate makes the old key 401, key not found in terminal or logs.
+
+---
+
+## Session 34: Weeks 3-4 (25-26 November 2026) - Device key in the app (frontend)
+- New SensorKeyPanel (key box that wraps at 360px, Copy key, one-time warning, "I saved it"). Shown after saving a sensor field and after "New sensor key" on a field card (with a confirm step).
+- The key is kept in memory only. cache.ts strips device_key before saving to the browser. Hand-tested, including storage check.
+- npm run lint shows 28 errors and 8 warnings, nearly all in older files (any types, setState inside effects, unused imports). The build passes. Cleanup is for later.
+
+---
+
+## Session 35: Weeks 3-4 (26 November 2026) - Rain override rule
+- scheduler.py only. Rain under 5 mm: unchanged. Rain of 5 mm up to 20 mm and soil below the crop's dry limit (get_target_range): one short session (half the normal time, at most 20 minutes) with the advice "Soil is very dry. Rain may come, but water a little today." Not very dry, no moisture reading, or rain-fed: still blocked. HEAVY_RAIN_MM = 20: rain of 20 mm or more always blocks.
+- Tested with made-up inputs (no database writes).
+
+---
+
+## Session 36: Weeks 3-4 (26 November 2026) - One moisture limit, generator pump fix
+- conditions.py now uses each crop's limits from get_target_range for dry/okay/good, with its own 30/60 fallback for unknown crop or stage. The IDE also changed DEFAULT_TARGET_MOISTURE in crop_targets.py; this was reverted to 45/65 because the ML training uses it.
+- generate_data.py: rain-fed fields no longer get a pump flow rate in the fake data (0 of 277; other fields about 91%). The generator was not rerun and nothing was retrained.
+- Decisions: not deleting old collector data (the collector only writes weather_readings, about 570 small rows). Keeping both irrigation_logs source columns (source = farmer or auto, event_source = tap, manual or sensor detected). The test fields 87 to 89 may be deleted.
+
+### Known Gaps
+- For retraining: rain-fed fields still get irrigation labels in the fake data, and the generator label rule still uses the old "5 mm rain always blocks" rule.
+- For an unknown crop or stage, conditions uses 30/60 but the scheduler uses 45/65.
+- Lint: 28 errors and 8 warnings in older files.
+- Manual ALTER TABLE changes (no setup script), done marks sessions by order with no Undo, OTP is fake, expired tokens are not removed, alerts page and Active alerts tile are sample data, LSTM not done.
+
+### What's Next
+1. Database setup script
+2. Regenerate the fake data, retrain, and add the LSTM (compare all three in MLflow)
+3. Weeks 5-6: alerts, language and voice, field detail page, reports, deployment
